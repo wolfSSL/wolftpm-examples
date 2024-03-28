@@ -4,7 +4,7 @@
 # the next time 'make getlibs' is run.
 #
 modlibs library-manager qspi-configurator config device-configurator capsense-configurator capsense-tuner seglcd-configurator bsp-assistant config_usbdev usbdev-configurator smartio-configurator config_ezpd ez-pd-configurator :
-	make -C Wi-Fi_HTTPS_Server_wolf $@
+	make -C PSoC6_WiFi_HTTPS_Server $@
 
 config_bt bt-configurator config_lin lin-configurator :
 	$(error $@ configurator cannot be executed at the application level. Run this command from the desired project directory.)

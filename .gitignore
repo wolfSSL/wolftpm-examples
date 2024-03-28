@@ -50,3 +50,5 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+
+Infineon/PSoC6_WiFi_HTTPS_Server/build
