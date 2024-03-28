@@ -1,0 +1,82 @@
+[
+    {
+        "asset-name": "abstraction-rtos",
+        "locked-commit": "release-v1.7.5"
+    },
+    {
+        "asset-name": "cat1cm0p",
+        "locked-commit": "release-v1.4.0"
+    },
+    {
+        "asset-name": "clib-support",
+        "locked-commit": "release-v1.4.2"
+    },
+    {
+        "asset-name": "cmsis",
+        "locked-commit": "release-v5.8.0"
+    },
+    {
+        "asset-name": "connectivity-utilities",
+        "locked-commit": "release-v4.3.0"
+    },
+    {
+        "asset-name": "core-lib",
+        "locked-commit": "release-v1.4.1"
+    },
+    {
+        "asset-name": "core-make",
+        "locked-commit": "release-v3.3.1"
+    },
+    {
+        "asset-name": "cy-mbedtls-acceleration",
+        "locked-commit": "release-v2.2.0"
+    },
+    {
+        "asset-name": "device-db",
+        "locked-commit": "release-v4.11.1"
+    },
+    {
+        "asset-name": "freertos",
+        "locked-commit": "release-v10.5.001"
+    },
+    {
+        "asset-name": "lwip-freertos-integration",
+        "locked-commit": "release-v1.0.0"
+    },
+    {
+        "asset-name": "lwip-network-interface-integration",
+        "locked-commit": "release-v1.3.0"
+    },
+    {
+        "asset-name": "mtb-hal-cat1",
+        "locked-commit": "release-v2.5.4"
+    },
+    {
+        "asset-name": "mtb-pdl-cat1",
+        "locked-commit": "release-v3.9.0"
+    },
+    {
+        "asset-name": "recipe-make-cat1a",
+        "locked-commit": "release-v2.2.0"
+    },
+    {
+        "asset-name": "secure-sockets",
+        "locked-commit": "release-v3.4.0"
+    },
+    {
+        "asset-name": "whd-bsp-integration",
+        "locked-commit": "release-v2.2.1"
+    },
+    {
+        "asset-name": "wifi-connection-manager",
+        "locked-commit": "release-v3.3.0"
+    },
+    {
+        "asset-name": "wifi-host-driver",
+        "locked-commit": "release-v3.0.0"
+    },
+    {
+        "asset-name": "wpa3-external-supplicant",
+        "locked-commit": "release-v1.2.0"
+    }
+]
