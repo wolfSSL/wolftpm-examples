@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../mtb_shared"
+		}
+	],
+	"settings": {
+		"cortex-debug.armToolchainPath": "${config:modustoolbox.toolsPath}/gcc/bin",
+		"cortex-debug.openocdPath": "${config:modustoolbox.toolsPath}/openocd/bin/openocd",
+		"cortex-debug.JLinkGDBServerPath.windows": "C:/Program Files/SEGGER/JLink/JLinkGDBServerCL.exe",
+		"cortex-debug.JLinkGDBServerPath.osx": "/Applications/SEGGER/JLink/JLinkGDBServerCLExe",
+		"cortex-debug.JLinkGDBServerPath.linux": "JLinkGDBServerCLExe"
+	}
+}
