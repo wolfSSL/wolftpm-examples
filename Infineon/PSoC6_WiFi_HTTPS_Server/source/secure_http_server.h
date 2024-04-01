@@ -87,47 +87,16 @@
 
 #define HTTPS_SERVER_NAME                        "mysecurehttpserver"
 #define MDNS_TTL_SECONDS                         (255)
-#define LED_STATUS_ON                            "ON"
-#define LED_STATUS_OFF                           "OFF"
-#define MAX_LED_STATUS_LENGTH                    (3)
+#define MAX_STATUS_LENGTH                        (256)
 #define HTTPS_PORT                               (50007)
 #define MAX_SOCKETS                              (2)
-#define HTTPS_GET_RESPONSE                       "Hello - Message from HTTPS server!"
-#define REGISTER_RESOURCE_TASK_STACK_SIZE        (1024)
-#define REGISTER_RESOURCE_TASK_PRIORITY          (tskIDLE_PRIORITY)
 #define REGISTER_RESOURCE_QUEUE_LENGTH           (1)
 #define NEW_RESOURCE_NAME_LENGTH                 (30)
 #define HTTPS_RESOURCE_PUT_ERROR                 "Maximum resource name length is %d characters."
 #define HTTPS_REQUEST_HANDLE_SUCCESS             (0)
 #define HTTPS_REQUEST_HANDLE_ERROR               (-1)
+#define MAX_HTTP_RESPONSE_LENGTH                 (1024)
 
-#define HTTPS_STARTUP_WEBPAGE \
-              "<!DOCTYPE html>" \
-              "<html>" \
-              "<head>" \
-              "<title>HTTPS Server Demo</title>" \
-              "</head>" \
-              "<body>" \
-                "<h1>HTTPS Server Demo</h1>" \
-                "<form method=\"get\">" \
-                    "<fieldset>" \
-                        "<legend>HTTPS GET</legend>" \
-                        "<input type=\"submit\" value=\"Get LED status\"/>" \
-                        "<input type=\"text\" name=\"led_status\" value=\"%s\" size=\"3\" readonly/></br></br>" \
-                    "</fieldset>" \
-                    "</br>" \
-                "</form>" \
-                "<form method=\"post\">" \
-                    "<fieldset>" \
-                        "<legend>HTTPS POST</legend>" \
-                        "<input type=\"submit\" name=\"toggle_led\" value=\"Toggle LED\"/></br></br>" \
-                    "</fieldset>" \
-                    "</br>" \
-                "</form>" \
-              "</body>" \
-              "</html>"
-
-#define MAX_HTTP_RESPONSE_LENGTH                 (sizeof(HTTPS_STARTUP_WEBPAGE) + sizeof(MAX_LED_STATUS_LENGTH) + 1)
 
 /*******************************************************************************
 * Function Prototypes

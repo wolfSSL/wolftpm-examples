@@ -107,25 +107,26 @@ static const char* TPM2_IFX_GetOpModeStr(int opMode)
     return opModeStr;
 }
 
-static int TPM2_IFX_PrintInfo(WOLFTPM2_DEV* dev)
+static char mTPMInfo[MAX_STATUS_LENGTH];
+const char* TPM2_IFX_GetInfo(void)
 {
     int rc;
     WOLFTPM2_CAPS caps;
-    rc = wolfTPM2_GetCapabilities(dev, &caps);
+    memset(mTPMInfo, 0, sizeof(mTPMInfo));
+    rc = wolfTPM2_GetCapabilities(&mDev, &caps);
     if (rc == TPM_RC_SUCCESS) {
-        printf("Mfg %s (%d), Vendor %s, Fw %u.%u (0x%x)\n",
+        sprintf(mTPMInfo,
+            "Mfg %s (%d), Vendor %s, Fw %u.%u (0x%x)\n",
             caps.mfgStr, caps.mfg, caps.vendorStr, caps.fwVerMajor,
             caps.fwVerMinor, caps.fwVerVendor);
-        printf("Operational mode: %s (0x%x)\n",
+        sprintf(mTPMInfo + strlen(mTPMInfo),
+            "Operational mode: %s (0x%x)\n",
             TPM2_IFX_GetOpModeStr(caps.opMode), caps.opMode);
-        printf("KeyGroupId 0x%x, FwCounter %d (%d same)\n",
+        sprintf(mTPMInfo + strlen(mTPMInfo),
+            "KeyGroupId 0x%x, FwCounter %d (%d same)\n",
             caps.keyGroupId, caps.fwCounter, caps.fwCounterSame);
-        if (caps.keyGroupId == 0) {
-            printf("Error getting key group id from TPM!\n");
-            rc = -1;
-        }
     }
-    return rc;
+    return mTPMInfo;
 }
 
 
@@ -186,14 +187,14 @@ int main(void)
             result = cyhal_i2c_configure(&mI2C, &i2c_cfg);
         }
 
-
         APP_INFO(("===================================\n"));
         APP_INFO(("Infineon TPM Info\n"));
         APP_INFO(("===================================\n\n"));
 
         int rc = wolfTPM2_Init(&mDev, TPM2_IoCb, &mI2C);
         if (rc == TPM_RC_SUCCESS) {
-            rc = TPM2_IFX_PrintInfo(&mDev);
+            const char* buf = TPM2_IFX_GetInfo();
+            puts(buf);
         }
         else {
             printf("Infineon get information failed 0x%x: %s\n",

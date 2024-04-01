@@ -66,6 +66,10 @@
 /* MDNS responder header file */
 #include "mdns.h"
 
+/* TPM */
+#include <wolftpm/tpm2_wrap.h>
+extern WOLFTPM2_DEV mDev;
+
 /*******************************************************************************
 * Global Variables
 ********************************************************************************/
@@ -95,9 +99,6 @@ static cy_resource_dynamic_data_t https_put_resource;
 /* Queues the HTTPS PUT request to register new page resource in the server. */
 static QueueHandle_t register_resource_queue_handle;
 
-/* Holds the current LED status. */
-static char *led_status = LED_STATUS_OFF;
-
 /* HTTPS new page resource name */
 static char resource_name[NEW_RESOURCE_NAME_LENGTH] = {0};
 
@@ -123,11 +124,90 @@ static https_url_database_t url_resources_db[MAX_NUMBER_OF_HTTP_SERVER_RESOURCES
     { (char *)"/", NULL, 0 }
 };
 
+typedef struct {
+    byte*  manifest_buf;
+    byte*  firmware_buf;
+    size_t manifest_bufSz;
+    size_t firmware_bufSz;
+} fw_info_t;
+
+static fw_info_t mFwInfo;
+
 /******************************************************************************
 * Function Prototypes
 *******************************************************************************/
 static cy_rslt_t configure_https_server(void);
 void print_heap_usage(char *msg);
+extern const char* TPM2_IFX_GetInfo(void);
+
+
+#if 0 /* TODO: Add HTTP post callback */
+static int TPM2_IFX_FwData_Cb(uint8_t* data, uint32_t data_req_sz,
+    uint32_t offset, void* cb_ctx)
+{
+    fw_info_t* fwinfo = (fw_info_t*)cb_ctx;
+    if (offset > fwinfo->firmware_bufSz) {
+        return BUFFER_E;
+    }
+    if (offset + data_req_sz > (uint32_t)fwinfo->firmware_bufSz) {
+        data_req_sz = (uint32_t)fwinfo->firmware_bufSz - offset;
+    }
+    if (data_req_sz > 0) {
+        XMEMCPY(data, &fwinfo->firmware_buf[offset], data_req_sz);
+    }
+    return data_req_sz;
+}
+#endif
+
+#define HTTPS_STARTUP_HEADER \
+"<!DOCTYPE html>" \
+"<html>" \
+"<head>" \
+"<title>Infineon TPM Firmware Update Demo</title>" \
+"</head>" \
+"<body>" \
+"<h1>Infineon TPM Firmware Update Demo</h1>" \
+"<p><span style=\"font-size: 12pt;\"><strong>Infineon</strong> is the first TPM vendor to <strong>open source their firmware update procedure and process</strong> in their latest <strong>Infineon SLB9672 (SPI) and SLB9673 (I2C)</strong> versions of the TPM 2.0 module.</span></p>" \
+"<p><span style=\"font-size: 12pt;\"><strong>wolfTPM</strong> is the only library to off integrated support for updating TPM firmware.</span></p>" \
+"<p><span style=\"text-decoration: underline;\"><span style=\"font-size: 12pt;\">Demo Platform:</span></span></p>" \
+"<ul>" \
+"    <li><span style=\"font-size: 12pt;\">Infineon PSoC 62S2 evaluation kit (Wifi)</span></li>" \
+"    <li><span style=\"font-size: 12pt;\">Infineon SLB9373 (I2C) TPM 2.0 mikroBUS module</span></li>" \
+"    <li><span style=\"font-size: 12pt;\">Modus Toolbox Wi-Fi-HTTPS-Server demo</span>" \
+"    <ul>" \
+"        <li><span style=\"font-size: 12pt;\">wolfSSL TLS v1.3 server</span></li>" \
+"        <li><span style=\"font-size: 12pt;\">wolfTPM</span></li>" \
+"    </ul>" \
+"    </li>" \
+"</ul>" \
+"<h2>TPM Module Interface</h2>" \
+"<form method=\"get\">" \
+"<fieldset>" \
+"    <legend>Firmware Status</legend>" \
+"    <input type=\"submit\" value=\"Refresh TPM\"/>" \
+"    <textarea id=\"tpm_status\" name=\"tpm_status\" rows=\"4\" cols=\"60\">"
+
+#define HTTPS_STARTUP_FOOTER \
+"    </textarea>" \
+"</fieldset>" \
+"</form>" \
+"<form method=\"post\">" \
+"<fieldset>" \
+"    <legend>Firmware Update</legend>" \
+"    <p>" \
+"        <label for=\"manifest\">Manifest File:</label>" \
+"        <input type=\"file\" name=\"manifest\" value=\"Manifest File\"/></br></br>" \
+"    </p>" \
+"    <p>" \
+"        <label for=\"data\">Firmware File:</label>" \
+"        <input type=\"file\" name=\"data\" value=\"Firmware File\"/>" \
+"    </p>" \
+"</fieldset>" \
+"</form>" \
+"</body>" \
+"</html>"
+
+
 
 /*******************************************************************************
  * Function Name: dynamic_resource_handler
@@ -162,31 +242,28 @@ int32_t dynamic_resource_handler(const char* url_path,
     int32_t status = HTTPS_REQUEST_HANDLE_SUCCESS;
     char https_response[MAX_HTTP_RESPONSE_LENGTH] = {0};
     char *register_new_resource = NULL;
+    const char* msg;
 
     switch (https_message_body->request_type)
     {
         case CY_HTTP_REQUEST_GET:
             APP_INFO(("Received HTTPS GET request.\n"));
 
-            /* Update the current LED status. This status will be sent
-             * in response to the POST request.
-             */
-            if (CYBSP_LED_STATE_ON == cyhal_gpio_read(CYBSP_USER_LED))
-            {
-                led_status = LED_STATUS_ON;
-            }
-            else
-            {
-                led_status = LED_STATUS_OFF;
-            }
-
-            sprintf(https_response, HTTPS_STARTUP_WEBPAGE, led_status);
-
             /* Send the HTTPS response. */
-            result = cy_http_server_response_stream_write_payload(stream, https_response, sizeof(https_response));
-
-            if (CY_RSLT_SUCCESS != result)
-            {
+            msg = HTTPS_STARTUP_HEADER;
+            result = cy_http_server_response_stream_write_payload(stream,
+                msg, strlen(msg));
+            if (CY_RSLT_SUCCESS == result) {
+                msg = TPM2_IFX_GetInfo();
+                result = cy_http_server_response_stream_write_payload(stream,
+                    msg, strlen(msg));
+            }
+            if (CY_RSLT_SUCCESS == result) {
+                msg = HTTPS_STARTUP_FOOTER;
+                result = cy_http_server_response_stream_write_payload(stream,
+                    msg, strlen(msg));
+            }
+            if (CY_RSLT_SUCCESS != result) {
                 ERR_INFO(("Failed to send the HTTPS GET response.\n"));
             }
             break;
@@ -194,11 +271,13 @@ int32_t dynamic_resource_handler(const char* url_path,
         case CY_HTTP_REQUEST_POST:
             APP_INFO(("Received HTTPS POST request.\n"));
 
-            /* Send the current LED status before toggling in response to the POST request.
-             * The user can then send a GET request to get the latest LED status
-             * on the webpage.
-             */
-            sprintf(https_response, HTTPS_STARTUP_WEBPAGE, led_status);
+            /* TODO: Upload the files using the */
+            #if 0
+            rc = wolfTPM2_FirmwareUpgrade(&mDev,
+                fwinfo.manifest_buf, (uint32_t)fwinfo.manifest_bufSz,
+                TPM2_IFX_FwData_Cb, &mFwInfo);
+            #endif
+            (void)mFwInfo;
 
             /* Toggle the user LED. */
             cyhal_gpio_toggle(CYBSP_USER_LED);
@@ -216,12 +295,12 @@ int32_t dynamic_resource_handler(const char* url_path,
             if (https_message_body->data_length > sizeof(resource_name))
             {
                 /* Report the error response to the client. */
-                ERR_INFO(("Resource name length exceeded the limit. Maximum: %d, Received: %d", sizeof(resource_name), (https_message_body->data_length)));
+                ERR_INFO(("Resource name length exceeded the limit. Maximum: %d, Received: %d",
+                    sizeof(resource_name), (https_message_body->data_length)));
                 sprintf(https_response, HTTPS_RESOURCE_PUT_ERROR, sizeof(resource_name));
 
                 /* Send the HTTPS error response. */
-                result = cy_http_server_response_stream_write_payload(stream, https_response, sizeof(https_response));
-
+                result = cy_http_server_response_stream_write_payload(stream, https_response, strlen(https_response));
                 if (CY_RSLT_SUCCESS != result)
                 {
                     ERR_INFO(("Failed to send the HTTPS PUT error response.\n"));
@@ -323,7 +402,7 @@ int32_t https_put_resource_handler(const char *url_path,
  *  request is received from the client.
  *
  * Parameters:
- *  register_resource_name: Pointer to the resource name to be registered 
+ *  register_resource_name: Pointer to the resource name to be registered
  *   with the HTTPS server.
  *
  * Return:
@@ -458,7 +537,7 @@ static cy_rslt_t configure_https_server(void)
     nw_interface.type = CY_NW_INF_TYPE_WIFI;
 
     /* Initialize secure socket library. */
-    result = cy_http_server_network_init(); 
+    result = cy_http_server_network_init();
 
     /* Allocate memory needed for secure HTTP server. */
     result = cy_http_server_create(&nw_interface, HTTPS_PORT, MAX_SOCKETS, &security_config, &https_server);

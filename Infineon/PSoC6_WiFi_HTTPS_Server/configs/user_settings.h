@@ -47,6 +47,9 @@ extern "C" {
 #define WOLFTPM_EXAMPLE_HAL
 #define WOLFTPM_FIRMWARE_UPGRADE
 
+#include <stdint.h>
+extern void Cy_SysLib_Delay(uint32_t milliseconds);
+extern void Cy_SysLib_DelayUs(uint16_t microseconds);
 #define XSLEEP_MS(ms) Cy_SysLib_Delay(ms)
 #define XTPM_WAIT()   XSLEEP_MS(1)
 
