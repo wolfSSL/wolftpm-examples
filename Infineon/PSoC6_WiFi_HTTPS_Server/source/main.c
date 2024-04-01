@@ -61,6 +61,9 @@
 #include "cycfg_qspi_memslot.h"
 #endif
 
+#include <wolftpm/tpm2_wrap.h>
+#include <hal/tpm_io.h>
+
 /*****************************************************************************
 * Macros
 ******************************************************************************/
@@ -68,11 +71,63 @@
 #define HTTPS_SERVER_TASK_STACK_SIZE        (5 * 1024)
 #define HTTPS_SERVER_TASK_PRIORITY          (1)
 
+#define TPM2_I2C_HZ   400000UL /* 400kHz */
+
 /*******************************************************************************
 * Global Variables
 ********************************************************************************/
 /* HTTPS server task handle. */
 TaskHandle_t https_server_task_handle;
+
+cyhal_i2c_t mI2C;
+WOLFTPM2_DEV mDev;
+
+static const char* TPM2_IFX_GetOpModeStr(int opMode)
+{
+    const char* opModeStr = "Unknown";
+    switch (opMode) {
+        case 0x00:
+            opModeStr = "Normal TPM operational mode";
+            break;
+        case 0x01:
+            opModeStr = "TPM firmware update mode (abandon possible)";
+            break;
+        case 0x02:
+            opModeStr = "TPM firmware update mode (abandon not possible)";
+            break;
+        case 0x03:
+            opModeStr = "After successful update, but before finalize";
+            break;
+        case 0x04:
+            opModeStr = "After finalize or abandon, reboot required";
+            break;
+        default:
+            break;
+    }
+    return opModeStr;
+}
+
+static int TPM2_IFX_PrintInfo(WOLFTPM2_DEV* dev)
+{
+    int rc;
+    WOLFTPM2_CAPS caps;
+    rc = wolfTPM2_GetCapabilities(dev, &caps);
+    if (rc == TPM_RC_SUCCESS) {
+        printf("Mfg %s (%d), Vendor %s, Fw %u.%u (0x%x)\n",
+            caps.mfgStr, caps.mfg, caps.vendorStr, caps.fwVerMajor,
+            caps.fwVerMinor, caps.fwVerVendor);
+        printf("Operational mode: %s (0x%x)\n",
+            TPM2_IFX_GetOpModeStr(caps.opMode), caps.opMode);
+        printf("KeyGroupId 0x%x, FwCounter %d (%d same)\n",
+            caps.keyGroupId, caps.fwCounter, caps.fwCounterSame);
+        if (caps.keyGroupId == 0) {
+            printf("Error getting key group id from TPM!\n");
+            rc = -1;
+        }
+    }
+    return rc;
+}
+
 
 /*******************************************************************************
  * Function Name: main
@@ -120,6 +175,33 @@ int main(void)
 
     /* \x1b[2J\x1b[;H - ANSI ESC sequence to clear screen */
     APP_INFO(("\x1b[2J\x1b[;H"));
+
+    /* Get TPM information */
+    {
+        cyhal_i2c_cfg_t i2c_cfg;
+        memset(&i2c_cfg, 0, sizeof(i2c_cfg));
+        i2c_cfg.frequencyhal_hz = TPM2_I2C_HZ;
+        result = cyhal_i2c_init(&mI2C, CYBSP_I2C_SDA, CYBSP_I2C_SCL, NULL);
+        if (result == CY_RSLT_SUCCESS) {
+            result = cyhal_i2c_configure(&mI2C, &i2c_cfg);
+        }
+
+
+        APP_INFO(("===================================\n"));
+        APP_INFO(("Infineon TPM Info\n"));
+        APP_INFO(("===================================\n\n"));
+
+        int rc = wolfTPM2_Init(&mDev, TPM2_IoCb, &mI2C);
+        if (rc == TPM_RC_SUCCESS) {
+            rc = TPM2_IFX_PrintInfo(&mDev);
+        }
+        else {
+            printf("Infineon get information failed 0x%x: %s\n",
+                rc, TPM2_GetRCString(rc));
+        }
+    }
+
+
     APP_INFO(("===================================\n"));
     APP_INFO(("HTTPS Server\n"));
     APP_INFO(("===================================\n\n"));

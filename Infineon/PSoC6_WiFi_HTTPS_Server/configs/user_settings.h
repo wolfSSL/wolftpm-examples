@@ -40,6 +40,17 @@ extern "C" {
 #define WOLFSSL_SMALL_STACK /* limit stack usage */
 #define BENCH_EMBEDDED
 
+/* Infineon TPM 2.0 - SLB9673 (I2C) */
+#define WOLFTPM_SLB9673
+#define WOLFTPM_I2C
+#define WOLFTPM_ADV_IO
+#define WOLFTPM_EXAMPLE_HAL
+#define WOLFTPM_FIRMWARE_UPGRADE
+
+#include "cyhal_system.h"
+#define XSLEEP_MS(ms) cyhal_system_delay_ms(ms)
+
+
 /* TLS (allow TLS v1.3 or v1.2) */
 #define WOLFSSL_TLS13
 //#define WOLFSSL_NO_TLS12
@@ -115,7 +126,7 @@ extern "C" {
 #define WOLFSSL_SHA512
 
 /* Symmetric Cipher */
-#define WOLFSSL_AES_CFB
+#define WOLFSSL_AES_CFB /* TPM Parameter Encryption rquires */
 #define HAVE_AES_DECRYPT
 
 #define HAVE_AES_KEYWRAP
@@ -125,6 +136,7 @@ extern "C" {
 
 /* Features */
 #define WOLFSSL_ASN_TEMPLATE
+#define WOLFSSL_PUBLIC_MP /* ECC parameter encryption requires mp_ API access */
 
 #define WOLFSSL_CERT_GEN
 #define WOLFSSL_CERT_REQ
@@ -157,6 +169,7 @@ extern "C" {
 /* Logging */
 #ifdef ENABLE_SECURE_SOCKETS_LOGS
     #define DEBUG_WOLFSSL
+    #define DEBUG_WOLFTPM
 #else
     #define NO_ERROR_STRINGS
 #endif
