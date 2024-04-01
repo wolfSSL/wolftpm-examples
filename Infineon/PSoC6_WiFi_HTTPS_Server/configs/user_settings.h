@@ -47,8 +47,8 @@ extern "C" {
 #define WOLFTPM_EXAMPLE_HAL
 #define WOLFTPM_FIRMWARE_UPGRADE
 
-#include "cyhal_system.h"
-#define XSLEEP_MS(ms) cyhal_system_delay_ms(ms)
+#define XSLEEP_MS(ms) Cy_SysLib_Delay(ms)
+#define XTPM_WAIT()   XSLEEP_MS(1)
 
 
 /* TLS (allow TLS v1.3 or v1.2) */
@@ -126,7 +126,7 @@ extern "C" {
 #define WOLFSSL_SHA512
 
 /* Symmetric Cipher */
-#define WOLFSSL_AES_CFB /* TPM Parameter Encryption rquires */
+#define WOLFSSL_AES_CFB /* TPM Parameter Encryption requires */
 #define HAVE_AES_DECRYPT
 
 #define HAVE_AES_KEYWRAP
@@ -170,6 +170,8 @@ extern "C" {
 #ifdef ENABLE_SECURE_SOCKETS_LOGS
     #define DEBUG_WOLFSSL
     #define DEBUG_WOLFTPM
+    //#define WOLFTPM_DEBUG_VERBOSE
+    //#define WOLFTPM_DEBUG_IO
 #else
     #define NO_ERROR_STRINGS
 #endif
