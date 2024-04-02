@@ -2,9 +2,9 @@
 
 ## Infineon PSoC6 wolfSSL HTTPS Server Example
 
-Tested on PSoC 62S2 eval kit (CY8CEVAL-062S2) and Sterling LWB5+ Wifi module.
+See [Infineon/PSoC6_WiFi_HTTPS_Server](/Infineon/PSoC6_WiFi_HTTPS_Server).
 
-See `PSoC6_WiFi_HTTPS_Server`.
+Tested on PSoC 62S2 eval kit (CY8CEVAL-062S2) and Sterling LWB5+ Wifi module.
 
 Based on the `Wi-Fi_HTTPS_Server` example. TLS ported to wolfSSL. TPM uses wolfTPM
 
@@ -16,4 +16,4 @@ Build steps:
 * Update `../mtb_shared/wpa3-external-supplicant` with https://github.com/Infineon/wpa3-external-supplicant/pull/2
 * `make -j 12`
 
-Support: For questions email support@wolfssl.com
+Support: For questions email [support@wolfssl.com](mailto:support@wolfssl.com).

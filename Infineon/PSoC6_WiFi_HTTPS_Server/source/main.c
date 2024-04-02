@@ -201,15 +201,15 @@ int main(void)
         }
     #else
         result = cyhal_spi_init(&mSPI,
-            CYBSP_MIKROBUS_SPI_MOSI, CYBSP_MIKROBUS_SPI_MISO, CYBSP_MIKROBUS_SPI_SCK,
-            CYBSP_MIKROBUS_SPI_CS,
+            CYBSP_MIKROBUS_SPI_MOSI, CYBSP_MIKROBUS_SPI_MISO,
+            CYBSP_MIKROBUS_SPI_SCK, CYBSP_MIKROBUS_SPI_CS,
             NULL, 8, CYHAL_SPI_MODE_00_MSB, false);
         if (result == CY_RSLT_SUCCESS) {
             result = cyhal_spi_set_frequency(&mSPI, TPM2_SPI_HZ);
         }
     #endif
         if (result != CY_RSLT_SUCCESS) {
-            printf("Infineon I2C/SPI init failed! %x\n", result);
+            printf("Infineon I2C/SPI init failed! %x\n", (uint32_t)result);
         }
 
         rc = wolfTPM2_Init(&mDev, TPM2_IoCb,

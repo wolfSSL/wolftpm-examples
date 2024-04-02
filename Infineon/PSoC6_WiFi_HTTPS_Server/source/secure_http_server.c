@@ -159,6 +159,33 @@ static int TPM2_IFX_FwData_Cb(uint8_t* data, uint32_t data_req_sz,
 }
 #endif
 
+/* Company Logo */
+#define INFINEON_LOGO \
+    "<img style=\"float: right;\" alt=\"logo.png\" "\
+    "src=\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAATkAAABcBAMAAADngd+fAA" \
+           "AAD1BMVEX///8VWJbiOlVtkLHIxNm177myAAAEAklEQVR4AezBgQAAAACAoP2pF6kCA" \
+           "ABmxgxw29VhMO4WHwArHABlOQBpOIAJvv+ZnmPolnbbwn9Dev2EPNJK3m+fHZPRlmRf" \
+           "JMKvh7aRwSvKXAsMryg0NnhFdcmKyvCSIupf1DgVErnzjJMkp8KJ0p2WLJJqhtPkR6L" \
+           "hPfvfPOxIdSZe9iHS9JGdV/5Lj+xiOEVX7z2851qIkHr4rRbadFqrKNz4sYpOkAY4qD" \
+           "XNX1unmk6zDtM7nZLR9Fu6hehU89CGcEc1HcJhurdHOqrFp1gXoKL7sqp80LuObPNHR" \
+           "0V9NQHQgsZ6MohmbnYdG10XOxr0xiVIvV6JGGAx2LKjMUp0LbqF9nXcS4tEk+aO/aI3" \
+           "EPdA5dcwLORwbhYWNjpSleiAesvRW5OzfQP4ZaOvt4f0kRKY5iIquEpAQJPeKKSuNjr" \
+           "LrmGeWoUdKzrWON/pBriQUF8cUS6rVcM7EqlWUrp4VZSZeHErcVkxDSJIcxw6DY3RlS" \
+           "u6qSPWfGB0rlyLK2vSq99iw7tHYdn9SJqIYOn1Pk5ArAGQ4OI6/XRoth3c6RgrumFHW" \
+           "4Z9qfa1vENhqNT1G91C7hMdd4Xucozu8kHXP9E5pOkrOkxpnW+3Oa1p5R2HXA27FiIQ" \
+           "TT5A3Ohwo7PJgJbuD96RaqNzn+lu6e2W0k1/vFUDZVLsaaMnoysf9+pdAbMudPr9Qlz" \
+           "2EP8zXX+ULhU85dPr3TvTYMs4CG90qLHes7rEYl6n4U/eORH5wbtk3qW3is7U0YQidz" \
+           "ogLnRDAes1p5tA1xYODONvvTNU+IYOtO20qKkInuimZLbvfWd0pSPjFDWzAVsu1NCiG" \
+           "3/cs6qDe7aic3C50yFtdD0UusXy2EQZOge6bM278L13eiHf593UnHdIpr2IVDx/ors4" \
+           "8647Nu/s/PS9dxcb55FWmo54B7RrMhct21LT9epX9ayQOLQPUOO3dLg/z4jgEF2kTfv" \
+           "N9pyt6dC+stCDudtsvHCn657oLDvrmmZoVbY+fA5I1RmlriwSG123obsjR2OGbyWsAe" \
+           "Xw+c7ES32++1JoyaEpr4J/kDTPxhOg6az/K0Y4rEczuvRIt9JjtbIwewx5CygIeQyIE" \
+           "vLoOaCwHDHvMB6OT5V9Si8fAlXAEHzmMAbPOWD2cMV8zXqFEHL2oxwxz/NBuAA/a42b" \
+           "Ukyg8tkrXQjjqDBidNd89Uo3+qx0DE3lw3jY7FBMd7GlDlLolEV8HtU29c5flVKCmoq" \
+           "Z4Tw8+1sP4vHZ72SbxhlcG68UVgBOxWvZlw8PHhGBc3X1JvneNx/+75faX79zx/wC75" \
+           "SNwRSC4MYlcv/I1i/C96QALyH8ClDgdYTy4Jr81x4cEwAAACAMsn9qM+wHlgEAAADAA" \
+           "To83zvHyP+JAAAAAElFTkSuQmCC\" />"
+
 #define HTTPS_STARTUP_HEADER \
 "<!DOCTYPE html>" \
 "<html>" \
@@ -166,7 +193,9 @@ static int TPM2_IFX_FwData_Cb(uint8_t* data, uint32_t data_req_sz,
 "<title>Infineon TPM Firmware Update Demo</title>" \
 "</head>" \
 "<body>" \
-"<h1>Infineon TPM Firmware Update Demo</h1>" \
+"<h1 style=\"text-align: left\">Infineon TPM Firmware Update Demo" \
+INFINEON_LOGO \
+"</h1>" \
 "<p><span style=\"font-size: 12pt;\"><strong>Infineon</strong> is the first TPM vendor to <strong>open source their " \
 "firmware update procedure and process</strong> in their latest <strong>Infineon SLB9672 (SPI) and SLB9673 (I2C)</strong> versions of the TPM 2.0 module.</span></p>" \
 "<p><span style=\"font-size: 12pt;\"><strong>wolfTPM</strong> is the only library to offer integrated support for updating TPM firmware.</span></p>" \
@@ -203,10 +232,13 @@ static int TPM2_IFX_FwData_Cb(uint8_t* data, uint32_t data_req_sz,
 "        <label for=\"data\">Firmware File:</label>" \
 "        <input type=\"file\" name=\"data\" value=\"Firmware File\"/>" \
 "    </p>" \
+"    <input type=\"submit\" name=\"submit\" value=\"Update Firmware\"/>" \
 "</fieldset>" \
 "</form>" \
 "</body>" \
 "</html>"
+
+
 
 
 
@@ -285,7 +317,6 @@ int32_t dynamic_resource_handler(const char* url_path,
 
             /* Send the HTTPS response. */
             result = cy_http_server_response_stream_write_payload(stream, https_response, sizeof(https_response));
-
             if (CY_RSLT_SUCCESS != result)
             {
                 ERR_INFO(("Failed to send the HTTPS POST response.\n"));
