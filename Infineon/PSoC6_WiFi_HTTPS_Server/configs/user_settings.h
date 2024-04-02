@@ -41,9 +41,13 @@ extern "C" {
 #define BENCH_EMBEDDED
 
 /* Infineon TPM 2.0 - SLB9673 (I2C) */
-#define WOLFTPM_SLB9673
-#define WOLFTPM_I2C
-#define WOLFTPM_ADV_IO
+#if 1 /* I2C */
+    #define WOLFTPM_SLB9673
+    #define WOLFTPM_I2C
+    #define WOLFTPM_ADV_IO
+#else /* SPI */
+    #define WOLFTPM_SLB9672
+#endif
 #define WOLFTPM_EXAMPLE_HAL
 #define WOLFTPM_FIRMWARE_UPGRADE
 

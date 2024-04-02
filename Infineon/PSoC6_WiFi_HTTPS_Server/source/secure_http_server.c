@@ -167,7 +167,8 @@ static int TPM2_IFX_FwData_Cb(uint8_t* data, uint32_t data_req_sz,
 "</head>" \
 "<body>" \
 "<h1>Infineon TPM Firmware Update Demo</h1>" \
-"<p><span style=\"font-size: 12pt;\"><strong>Infineon</strong> is the first TPM vendor to <strong>open source their firmware update procedure and process</strong> in their latest <strong>Infineon SLB9672 (SPI) and SLB9673 (I2C)</strong> versions of the TPM 2.0 module.</span></p>" \
+"<p><span style=\"font-size: 12pt;\"><strong>Infineon</strong> is the first TPM vendor to <strong>open source their " \
+"firmware update procedure and process</strong> in their latest <strong>Infineon SLB9672 (SPI) and SLB9673 (I2C)</strong> versions of the TPM 2.0 module.</span></p>" \
 "<p><span style=\"font-size: 12pt;\"><strong>wolfTPM</strong> is the only library to offer integrated support for updating TPM firmware.</span></p>" \
 "<p><span style=\"text-decoration: underline;\"><span style=\"font-size: 12pt;\">Demo Platform:</span></span></p>" \
 "<ul>" \

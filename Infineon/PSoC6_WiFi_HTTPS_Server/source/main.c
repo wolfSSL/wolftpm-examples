@@ -71,7 +71,8 @@
 #define HTTPS_SERVER_TASK_STACK_SIZE        (5 * 1024)
 #define HTTPS_SERVER_TASK_PRIORITY          (1)
 
-#define TPM2_I2C_HZ   400000UL /* 400kHz */
+#define TPM2_I2C_HZ     400000UL /* 400kHz */
+#define TPM2_SPI_HZ   30000000UL /* 30MHz */
 
 /*******************************************************************************
 * Global Variables
@@ -79,7 +80,12 @@
 /* HTTPS server task handle. */
 TaskHandle_t https_server_task_handle;
 
+#ifdef WOLFTPM_I2C
 cyhal_i2c_t mI2C;
+#else
+cyhal_spi_t mSPI;
+#endif
+
 WOLFTPM2_DEV mDev;
 
 static const char* TPM2_IFX_GetOpModeStr(int opMode)
@@ -177,8 +183,15 @@ int main(void)
     /* \x1b[2J\x1b[;H - ANSI ESC sequence to clear screen */
     APP_INFO(("\x1b[2J\x1b[;H"));
 
+    APP_INFO(("===================================\n"));
+    APP_INFO(("Infineon TPM Info\n"));
+    APP_INFO(("===================================\n\n"));
+
     /* Get TPM information */
     {
+        int rc;
+
+    #ifdef WOLFTPM_I2C
         cyhal_i2c_cfg_t i2c_cfg;
         memset(&i2c_cfg, 0, sizeof(i2c_cfg));
         i2c_cfg.frequencyhal_hz = TPM2_I2C_HZ;
@@ -186,12 +199,26 @@ int main(void)
         if (result == CY_RSLT_SUCCESS) {
             result = cyhal_i2c_configure(&mI2C, &i2c_cfg);
         }
+    #else
+        result = cyhal_spi_init(&mSPI,
+            CYBSP_MIKROBUS_SPI_MOSI, CYBSP_MIKROBUS_SPI_MISO, CYBSP_MIKROBUS_SPI_SCK,
+            CYBSP_MIKROBUS_SPI_CS,
+            NULL, 8, CYHAL_SPI_MODE_00_MSB, false);
+        if (result == CY_RSLT_SUCCESS) {
+            result = cyhal_spi_set_frequency(&mSPI, TPM2_SPI_HZ);
+        }
+    #endif
+        if (result != CY_RSLT_SUCCESS) {
+            printf("Infineon I2C/SPI init failed! %x\n", result);
+        }
 
-        APP_INFO(("===================================\n"));
-        APP_INFO(("Infineon TPM Info\n"));
-        APP_INFO(("===================================\n\n"));
-
-        int rc = wolfTPM2_Init(&mDev, TPM2_IoCb, &mI2C);
+        rc = wolfTPM2_Init(&mDev, TPM2_IoCb,
+        #ifdef WOLFTPM_I2C
+            &mI2C
+        #else
+            &mSPI
+        #endif
+        );
         if (rc == TPM_RC_SUCCESS) {
             const char* buf = TPM2_IFX_GetInfo();
             puts(buf);

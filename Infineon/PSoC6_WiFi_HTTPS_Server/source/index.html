@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Infineon TPM Firmware Update Demo</title>
+</head>
+<body>
+<h1>Infineon TPM Firmware Update Demo</h1>
+<p><span style="font-size: 12pt;"><strong>Infineon</strong> is the first TPM vendor to <strong>open source their
+    firmware update procedure and process</strong> in their latest <strong>Infineon SLB9672 (SPI) and SLB9673 (I2C)</strong> versions of the TPM 2.0 module.</span></p>
+<p><span style="font-size: 12pt;"><strong>wolfTPM</strong> is the only library to offer integrated support for updating TPM firmware.</span></p>
+<p><span style="text-decoration: underline;"><span style="font-size: 12pt;">Demo Platform:</span></span></p>
+<ul>
+    <li><span style="font-size: 12pt;">Infineon PSoC 62S2 evaluation kit (Wifi)</span></li>
+    <li><span style="font-size: 12pt;">Infineon SLB9373 (I2C) TPM 2.0 mikroBUS module</span></li>
+    <li><span style="font-size: 12pt;">Modus Toolbox Wi-Fi-HTTPS-Server demo</span>
+    <ul>
+        <li><span style="font-size: 12pt;">wolfSSL TLS v1.3 server</span></li>
+        <li><span style="font-size: 12pt;">wolfTPM</span></li>
+    </ul>
+    </li>
+</ul>
+<h2>TPM Module Interface</h2>
+<form method="get">
+<fieldset>
+    <legend>Firmware Status</legend>
+    <input type="submit" value="Refresh TPM"/>
+    <textarea id="tpm_status" name="tpm_status" rows="4" cols="60">
+Mfg IFX (1), Vendor SLB9673, Fw 26.0 (0x412a)
+Operational mode: Normal TPM operational mode (0x0)
+KeyGroupId 0x7, FwCounter 1256 (256 same)
+    </textarea>
+</fieldset>
+</form>
+<form method="post">
+<fieldset>
+    <legend>Firmware Update</legend>
+    <p>
+        <label for="manifest">Manifest File:</label>
+        <input type="file" name="manifest" value="Manifest File"/></br></br>
+    </p>
+    <p>
+        <label for="data">Firmware File:</label>
+        <input type="file" name="data" value="Firmware File"/>
+    </p>
+</fieldset>
+</form>
+</body>
+</html>
