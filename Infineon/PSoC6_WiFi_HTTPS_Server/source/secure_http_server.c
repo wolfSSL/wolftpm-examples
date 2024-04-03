@@ -221,7 +221,7 @@ INFINEON_LOGO \
 "    </textarea>" \
 "</fieldset>" \
 "</form>" \
-"<form method=\"post\">" \
+"<form method=\"post\" enctype=\"multipart/form-data\">" \
 "<fieldset>" \
 "    <legend>Firmware Update</legend>" \
 "    <p>" \

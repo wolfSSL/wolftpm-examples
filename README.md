@@ -14,6 +14,7 @@ Build steps:
 * Update `../mtb_shared/wolfssl` with https://github.com/wolfSSL/wolfssl/pull/7369
 * Update `../mtb_shared/secure-sockets` with https://github.com/Infineon/secure-sockets/pull/1
 * Update `../mtb_shared/wpa3-external-supplicant` with https://github.com/Infineon/wpa3-external-supplicant/pull/2
-* `make -j 12`
+* Update `bsps/TARGET_APP_CY8CEVAL-062S2-LAI-4373M2/config/GeneratedSource/cycfg_system.h` -> `#define CY_CFG_PWR_DEEPSLEEP_LATENCY 125UL`.
+* `make build -j8`
 
 Support: For questions email [support@wolfssl.com](mailto:support@wolfssl.com).

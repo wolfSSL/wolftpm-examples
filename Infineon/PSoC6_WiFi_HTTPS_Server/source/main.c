@@ -49,6 +49,7 @@
 #include "cyhal.h"
 #include "cybsp.h"
 #include "cy_retarget_io.h"
+#include "cy_log.h"
 #include "secure_http_server.h"
 #include <FreeRTOS.h>
 #include <task.h>
@@ -157,7 +158,6 @@ int main(void)
 
     /* Initialize the Board Support Package (BSP) */
     result = cybsp_init();
-
     CHECK_RESULT(result);
 
     /* Enable global interrupts */
@@ -179,6 +179,12 @@ int main(void)
 
         cy_serial_flash_qspi_enable_xip(true);
     #endif
+
+#if defined(ENABLE_SECURE_SOCKETS_LOGS) || defined(ENABLE_HTTP_SERVER_LOGS)
+    result = cy_log_init(CY_LOG_OFF, NULL, NULL);
+    CHECK_RESULT(result);
+    cy_log_set_facility_level(CYLF_MIDDLEWARE, CY_LOG_DEBUG);
+#endif
 
     /* \x1b[2J\x1b[;H - ANSI ESC sequence to clear screen */
     APP_INFO(("\x1b[2J\x1b[;H"));
@@ -209,7 +215,7 @@ int main(void)
         }
     #endif
         if (result != CY_RSLT_SUCCESS) {
-            printf("Infineon I2C/SPI init failed! %x\n", (uint32_t)result);
+            printf("Infineon I2C/SPI init failed! 0x%lx\n", (uint32_t)result);
         }
 
         rc = wolfTPM2_Init(&mDev, TPM2_IoCb,
