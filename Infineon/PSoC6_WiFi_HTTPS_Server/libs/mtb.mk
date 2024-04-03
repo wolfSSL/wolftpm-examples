@@ -11,6 +11,7 @@ SEARCH_TARGET_APP_CY8CEVAL-062S2-LAI-4373M2=bsps/TARGET_APP_CY8CEVAL-062S2-LAI-4
 
 # The search paths for the included middleware
 SEARCH_http-server=../mtb_shared/http-server/release-v3.0.0
+SEARCH_mtb-littlefs=../mtb_shared/mtb-littlefs/release-v2.0.1
 SEARCH_retarget-io=../mtb_shared/retarget-io/release-v1.5.0
 SEARCH_serial-flash=../mtb_shared/serial-flash/release-v1.4.2
 SEARCH_wifi-core-freertos-lwip-mbedtls=../mtb_shared/wifi-core-freertos-lwip-mbedtls/release-v2.0.0
@@ -25,6 +26,7 @@ SEARCH_core-lib=../mtb_shared/core-lib/release-v1.4.1
 SEARCH_core-make=../mtb_shared/core-make/release-v3.3.1
 SEARCH_cy-mbedtls-acceleration=../mtb_shared/cy-mbedtls-acceleration/release-v2.2.0
 SEARCH_freertos=../mtb_shared/freertos/release-v10.5.001
+SEARCH_littlefs=../mtb_shared/littlefs/v2.4.0
 SEARCH_lwip-freertos-integration=../mtb_shared/lwip-freertos-integration/release-v1.0.0
 SEARCH_lwip-network-interface-integration=../mtb_shared/lwip-network-interface-integration/release-v1.3.0
 SEARCH_lwip=../mtb_shared/lwip/STABLE-2_1_2_RELEASE
@@ -36,10 +38,11 @@ SEARCH_secure-sockets=../mtb_shared/secure-sockets/release-v3.4.0
 SEARCH_whd-bsp-integration=../mtb_shared/whd-bsp-integration/release-v2.2.1
 SEARCH_wifi-connection-manager=../mtb_shared/wifi-connection-manager/release-v3.3.0
 SEARCH_wifi-host-driver=../mtb_shared/wifi-host-driver/release-v3.0.0
-#SEARCH_wpa3-external-supplicant=../mtb_shared/wpa3-external-supplicant/release-v1.2.0
+SEARCH_wpa3-external-supplicant=../mtb_shared/wpa3-external-supplicant/release-v1.2.0
 
 # Search libraries added to build
 SEARCH_MTB_MK+=$(SEARCH_http-server)
+SEARCH_MTB_MK+=$(SEARCH_mtb-littlefs)
 SEARCH_MTB_MK+=$(SEARCH_retarget-io)
 SEARCH_MTB_MK+=$(SEARCH_serial-flash)
 SEARCH_MTB_MK+=$(SEARCH_wifi-core-freertos-lwip-mbedtls)
@@ -54,6 +57,7 @@ SEARCH_MTB_MK+=$(SEARCH_core-lib)
 SEARCH_MTB_MK+=$(SEARCH_core-make)
 SEARCH_MTB_MK+=$(SEARCH_cy-mbedtls-acceleration)
 SEARCH_MTB_MK+=$(SEARCH_freertos)
+SEARCH_MTB_MK+=$(SEARCH_littlefs)
 SEARCH_MTB_MK+=$(SEARCH_lwip-freertos-integration)
 SEARCH_MTB_MK+=$(SEARCH_lwip-network-interface-integration)
 SEARCH_MTB_MK+=$(SEARCH_lwip)
@@ -65,10 +69,11 @@ SEARCH_MTB_MK+=$(SEARCH_secure-sockets)
 SEARCH_MTB_MK+=$(SEARCH_whd-bsp-integration)
 SEARCH_MTB_MK+=$(SEARCH_wifi-connection-manager)
 SEARCH_MTB_MK+=$(SEARCH_wifi-host-driver)
-#SEARCH_MTB_MK+=$(SEARCH_wpa3-external-supplicant)
+SEARCH_MTB_MK+=$(SEARCH_wpa3-external-supplicant)
 
 -include $(CY_INTERNAL_APP_PATH)/importedbsp.mk
 COMPONENTS += MW_HTTP_SERVER
+COMPONENTS += MW_MTB_LITTLEFS
 COMPONENTS += MW_RETARGET_IO
 COMPONENTS += MW_SERIAL_FLASH
 COMPONENTS += MW_WIFI_CORE_FREERTOS_LWIP_MBEDTLS
@@ -83,6 +88,7 @@ COMPONENTS += MW_CORE_LIB
 COMPONENTS += MW_CORE_MAKE
 COMPONENTS += MW_CY_MBEDTLS_ACCELERATION
 COMPONENTS += MW_FREERTOS
+COMPONENTS += MW_LITTLEFS
 COMPONENTS += MW_LWIP_FREERTOS_INTEGRATION
 COMPONENTS += MW_LWIP_NETWORK_INTERFACE_INTEGRATION
 COMPONENTS += MW_LWIP
@@ -94,7 +100,7 @@ COMPONENTS += MW_SECURE_SOCKETS
 COMPONENTS += MW_WHD_BSP_INTEGRATION
 COMPONENTS += MW_WIFI_CONNECTION_MANAGER
 COMPONENTS += MW_WIFI_HOST_DRIVER
-#COMPONENTS += MW_WPA3_EXTERNAL_SUPPLICANT
+COMPONENTS += MW_WPA3_EXTERNAL_SUPPLICANT
 
 # Register map file
 DEVICE_CY8C624ABZI-S2D44_SVD=$(SEARCH_mtb-pdl-cat1)/devices/COMPONENT_CAT1A/svd/psoc6_02.svd

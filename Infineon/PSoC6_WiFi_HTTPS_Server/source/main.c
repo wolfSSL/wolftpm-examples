@@ -72,7 +72,7 @@
 #define HTTPS_SERVER_TASK_STACK_SIZE        (5 * 1024)
 #define HTTPS_SERVER_TASK_PRIORITY          (1)
 
-#define TPM2_I2C_HZ     400000UL /* 400kHz */
+#define TPM2_I2C_HZ    1000000UL /*  1MHz */
 #define TPM2_SPI_HZ   30000000UL /* 30MHz */
 
 /*******************************************************************************
@@ -115,7 +115,7 @@ static const char* TPM2_IFX_GetOpModeStr(int opMode)
 }
 
 static char mTPMInfo[MAX_STATUS_LENGTH];
-const char* TPM2_IFX_GetInfo(void)
+const char* TPM2_IFX_GetInfo(int firstCall)
 {
     int rc;
     WOLFTPM2_CAPS caps;
@@ -132,9 +132,118 @@ const char* TPM2_IFX_GetInfo(void)
         sprintf(mTPMInfo + strlen(mTPMInfo),
             "KeyGroupId 0x%x, FwCounter %d (%d same)\n",
             caps.keyGroupId, caps.fwCounter, caps.fwCounterSame);
+
+        /* cancel update that hasn't started */
+        if (firstCall && caps.opMode == 0x01) {
+            sprintf(mTPMInfo + strlen(mTPMInfo),
+                "Abandoning firmware update\nReset board\n");
+            wolfTPM2_FirmwareUpgradeCancel(&mDev);
+        }
+    }
+    else {
+        sprintf(mTPMInfo, "Get Capabilities failed 0x%x: %s\n",
+            rc, TPM2_GetRCString(rc));
     }
     return mTPMInfo;
 }
+
+#if 0
+/* Little FS SD Card */
+#include "lfs.h"
+#include "lfs_sd_bd.h"
+
+/*******************************************************************************
+* Function Name: check_status
+****************************************************************************//**
+* Summary:
+*  Prints the message, indicates the non-zero status (error condition) by
+*  turning the LED on, and asserts the non-zero status.
+*
+* Parameters:
+*  message - message to print if status is non-zero.
+*  status - status for evaluation.
+*
+*******************************************************************************/
+static void check_status(char *message, uint32_t status)
+{
+    if (0u != status)
+    {
+        printf("\n================================================================================\n");
+        printf("\nFAIL: %s\n", message);
+        printf("Error Code: 0x%08"PRIx32"\n", status);
+        printf("\n================================================================================\n");
+
+        while(true);
+    }
+}
+
+/*******************************************************************************
+* Function Name: print_block_device_parameters
+********************************************************************************
+* Summary:
+*   Prints the block device parameters such as the block count, block size, and
+*   program (page) size to the UART terminal.
+*
+* Parameters:
+*  lfs_cfg - pointer to the lfs_config structure.
+*
+*******************************************************************************/
+static void print_block_device_parameters(struct lfs_config *lfs_cfg)
+{
+    printf("Number of blocks: %"PRIu32"\n", lfs_cfg->block_count);
+    printf("Erase block size: %"PRIu32" bytes\n", lfs_cfg->block_size);
+    printf("Prog size: %"PRIu32" bytes\n\n", lfs_cfg->prog_size);
+}
+
+static int littlefs_task(void* arg)
+{
+    cy_rslt_t result;
+    lfs_t lfs;
+    lfs_file_t file;
+    lfs_sd_bd_config_t sd_bd_cfg;
+    struct lfs_config lfs_cfg;
+    int err;
+
+    /* Get the default configuration for the SD card block device. */
+    lfs_sd_bd_get_default_config(&sd_bd_cfg);
+
+    /* Initialize the pointers in lfs_cfg to NULL. */
+    memset(&lfs_cfg, 0, sizeof(lfs_cfg));
+
+    /* Create the SD card block device. */
+    result = lfs_sd_bd_create(&lfs_cfg, &sd_bd_cfg);
+    check_status("Creating SD card block device failed", result);
+
+    /* Mount the filesystem */
+    err = lfs_mount(&lfs, &lfs_cfg);
+
+    /* Reformat if we cannot mount the filesystem.
+     * This should only happen when littlefs is set up on the storage device for
+     * the first time.
+     */
+    if (err) {
+        printf("\nError in mounting. This could be the first time littlefs is used on the storage device.\n");
+        printf("Formatting the block device...\n\n");
+
+        lfs_format(&lfs, &lfs_cfg);
+        lfs_mount(&lfs, &lfs_cfg);
+    }
+
+    /* Read the TPM firmware files */
+    lfs_file_open(&lfs, &file, "TPM20_26.13.17770.0_R1.MANIFEST", LFS_O_RDWR | LFS_O_CREAT);
+    //lfs_file_open(&lfs, &file, "TPM20_26.13.17770.0_R1.DATA", LFS_O_RDWR | LFS_O_CREAT);
+    //lfs_soff_t lfs_file_size(lfs_t *lfs, lfs_file_t *file) {
+    //lfs_file_read(&lfs, &file, &boot_count, sizeof(boot_count));
+
+    lfs_file_close(&lfs, &file);
+
+    /* Release any resources we were using. */
+    lfs_unmount(&lfs);
+
+    lfs_sd_bd_destroy(&lfs_cfg);
+}
+#endif
+
 
 
 /*******************************************************************************
@@ -226,7 +335,7 @@ int main(void)
         #endif
         );
         if (rc == TPM_RC_SUCCESS) {
-            const char* buf = TPM2_IFX_GetInfo();
+            const char* buf = TPM2_IFX_GetInfo(1);
             puts(buf);
         }
         else {

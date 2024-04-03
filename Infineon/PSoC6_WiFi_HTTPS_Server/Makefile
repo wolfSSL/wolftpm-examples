@@ -109,6 +109,7 @@ DEFINES=$(WOLFSSLFLAGS) $(MBEDTLSFLAGS) CYBSP_WIFI_CAPABLE CY_RETARGET_IO_CONVER
 
 # Uncomment to enable TLS debugging
 #DEFINES+=ENABLE_SECURE_SOCKETS_LOGS
+#DEFINES+=ENABLE_HTTP_SERVER_LOGS
 
 # CY8CPROTO-062-4343W board shares the same GPIO for the user button (USER BTN1)
 # and the CYW4343W host wake up pin. Since this example uses the GPIO for
