@@ -88,7 +88,7 @@
 #define HTTPS_SERVER_NAME                        "mysecurehttpserver"
 #define MDNS_TTL_SECONDS                         (255)
 #define MAX_STATUS_LENGTH                        (256)
-#if 1
+#if 0
     /* use HTTPS (TLS) */
     #define HTTPS_PORT                           (50007)
 #else

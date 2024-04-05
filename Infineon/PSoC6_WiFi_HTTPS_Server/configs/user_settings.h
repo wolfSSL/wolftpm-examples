@@ -58,6 +58,13 @@ extern void Cy_SysLib_DelayUs(uint16_t microseconds);
 #define WOLFTPM_EXAMPLE_HAL
 #define WOLFTPM_FIRMWARE_UPGRADE
 #define TPM_TIMEOUT_TRIES 1000
+/* TPM small stack options */
+#define WOLFTPM_SMALL_STACK
+#define MAX_COMMAND_SIZE 1024
+#define MAX_RESPONSE_SIZE 1350
+#define WOLFTPM2_MAX_BUFFER 1500
+#define MAX_DIGEST_BUFFER 973
+
 
 /* TLS (allow TLS v1.3 or v1.2) */
 #define WOLFSSL_TLS13
