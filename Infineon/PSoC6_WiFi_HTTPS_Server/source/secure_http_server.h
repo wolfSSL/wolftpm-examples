@@ -88,14 +88,20 @@
 #define HTTPS_SERVER_NAME                        "mysecurehttpserver"
 #define MDNS_TTL_SECONDS                         (255)
 #define MAX_STATUS_LENGTH                        (256)
-#define HTTPS_PORT                               (50007)
+#if 0
+    /* use HTTPS (TLS) */
+    #define HTTPS_PORT                           (50007)
+#else
+    /* plain HTTP mode (no TLS) for debugging */
+    #define HTTP_PORT                            (80)
+#endif
 #define MAX_SOCKETS                              (2)
 #define REGISTER_RESOURCE_QUEUE_LENGTH           (1)
 #define NEW_RESOURCE_NAME_LENGTH                 (30)
-#define HTTPS_RESOURCE_PUT_ERROR                 "Maximum resource name length is %d characters."
 #define HTTPS_REQUEST_HANDLE_SUCCESS             (0)
 #define HTTPS_REQUEST_HANDLE_ERROR               (-1)
 #define MAX_HTTP_RESPONSE_LENGTH                 (1024)
+
 
 
 /*******************************************************************************

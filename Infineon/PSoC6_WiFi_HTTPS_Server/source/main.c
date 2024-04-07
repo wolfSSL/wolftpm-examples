@@ -72,7 +72,7 @@
 #define HTTPS_SERVER_TASK_STACK_SIZE        (5 * 1024)
 #define HTTPS_SERVER_TASK_PRIORITY          (1)
 
-#define TPM2_I2C_HZ     400000UL /* 400kHz */
+#define TPM2_I2C_HZ    1000000UL /*  1MHz */
 #define TPM2_SPI_HZ   30000000UL /* 30MHz */
 
 /*******************************************************************************
@@ -115,10 +115,11 @@ static const char* TPM2_IFX_GetOpModeStr(int opMode)
 }
 
 static char mTPMInfo[MAX_STATUS_LENGTH];
-const char* TPM2_IFX_GetInfo(void)
+const char* TPM2_IFX_GetInfo(int* opMode)
 {
     int rc;
     WOLFTPM2_CAPS caps;
+
     memset(mTPMInfo, 0, sizeof(mTPMInfo));
     rc = wolfTPM2_GetCapabilities(&mDev, &caps);
     if (rc == TPM_RC_SUCCESS) {
@@ -132,8 +133,25 @@ const char* TPM2_IFX_GetInfo(void)
         sprintf(mTPMInfo + strlen(mTPMInfo),
             "KeyGroupId 0x%x, FwCounter %d (%d same)\n",
             caps.keyGroupId, caps.fwCounter, caps.fwCounterSame);
+        if (opMode)
+            *opMode = caps.opMode;
+    }
+    else {
+        sprintf(mTPMInfo, "Get Capabilities failed 0x%x: %s\n",
+            rc, TPM2_GetRCString(rc));
     }
     return mTPMInfo;
+}
+
+int TPM2_IFX_Init(void)
+{
+    return wolfTPM2_Init(&mDev, TPM2_IoCb,
+    #ifdef WOLFTPM_I2C
+        &mI2C
+    #else
+        &mSPI
+    #endif
+    );
 }
 
 
@@ -167,7 +185,11 @@ int main(void)
     cy_retarget_io_init(CYBSP_DEBUG_UART_TX, CYBSP_DEBUG_UART_RX, CY_RETARGET_IO_BAUDRATE);
 
     /* Initialize the User LED. */
-    cyhal_gpio_init(CYBSP_USER_LED, CYHAL_GPIO_DIR_BIDIRECTIONAL, CYHAL_GPIO_DRIVE_STRONG, CYBSP_LED_STATE_OFF);
+    cyhal_gpio_init(CYBSP_USER_LED,      CYHAL_GPIO_DIR_BIDIRECTIONAL, CYHAL_GPIO_DRIVE_STRONG, CYBSP_LED_STATE_OFF);
+    cyhal_gpio_init(CYBSP_USER_LED2,     CYHAL_GPIO_DIR_BIDIRECTIONAL, CYHAL_GPIO_DRIVE_STRONG, CYBSP_LED_STATE_OFF);
+    cyhal_gpio_init(CYBSP_LED_RGB_RED,   CYHAL_GPIO_DIR_BIDIRECTIONAL, CYHAL_GPIO_DRIVE_STRONG, CYBSP_LED_STATE_OFF);
+    cyhal_gpio_init(CYBSP_LED_RGB_GREEN, CYHAL_GPIO_DIR_BIDIRECTIONAL, CYHAL_GPIO_DRIVE_STRONG, CYBSP_LED_STATE_OFF);
+    cyhal_gpio_init(CYBSP_LED_RGB_BLUE,  CYHAL_GPIO_DIR_BIDIRECTIONAL, CYHAL_GPIO_DRIVE_STRONG, CYBSP_LED_STATE_OFF);
 
     /* Init QSPI and enable XIP to get the Wi-Fi firmware from the QSPI NOR flash */
     #if defined(CY_ENABLE_XIP_PROGRAM)
@@ -218,16 +240,18 @@ int main(void)
             printf("Infineon I2C/SPI init failed! 0x%lx\n", (uint32_t)result);
         }
 
-        rc = wolfTPM2_Init(&mDev, TPM2_IoCb,
-        #ifdef WOLFTPM_I2C
-            &mI2C
-        #else
-            &mSPI
-        #endif
-        );
+        rc = TPM2_IFX_Init();
         if (rc == TPM_RC_SUCCESS) {
-            const char* buf = TPM2_IFX_GetInfo();
+            int opMode = 0;
+            const char* buf = TPM2_IFX_GetInfo(&opMode);
             puts(buf);
+
+            /* cancel update that hasn't started */
+            if (opMode == 0x01) {
+                printf("Abandoning firmware update\r\n");
+                printf("Reset board\r\n");
+                wolfTPM2_FirmwareUpgradeCancel(&mDev);
+            }
         }
         else {
             printf("Infineon get information failed 0x%x: %s\n",

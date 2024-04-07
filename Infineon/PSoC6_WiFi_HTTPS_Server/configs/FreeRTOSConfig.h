@@ -77,12 +77,13 @@
 #define configQUEUE_REGISTRY_SIZE               10
 #define configUSE_QUEUE_SETS                    0
 #define configUSE_TIME_SLICING                  1
-#define configENABLE_BACKWARD_COMPATIBILITY     0
+#define configENABLE_BACKWARD_COMPATIBILITY     1
 #define configNUM_THREAD_LOCAL_STORAGE_POINTERS 16
 
 /* Memory allocation related definitions. */
 #define configSUPPORT_STATIC_ALLOCATION         1
 #define configSUPPORT_DYNAMIC_ALLOCATION        1
+/* not used for heap type 3, see linker.ld */
 #define configTOTAL_HEAP_SIZE                   10240
 #define configAPPLICATION_ALLOCATED_HEAP        0
 

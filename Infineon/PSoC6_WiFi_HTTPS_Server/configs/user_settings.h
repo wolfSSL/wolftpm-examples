@@ -31,6 +31,7 @@ extern "C" {
 #endif
 
 /* Platform / Porting */
+#define FREERTOS
 #define NO_FILESYSTEM /* File system disable */
 #define SINGLE_THREADED /* No threading */
 #define WOLFSSL_USER_IO /* user recv/send callbacks for network IO */
@@ -39,6 +40,12 @@ extern "C" {
 #define WOLFSSL_IGNORE_FILE_WARN /* ignore file include warnings */
 #define WOLFSSL_SMALL_STACK /* limit stack usage */
 #define BENCH_EMBEDDED
+
+#include <stdint.h>
+extern void Cy_SysLib_Delay(uint32_t milliseconds);
+extern void Cy_SysLib_DelayUs(uint16_t microseconds);
+#define XSLEEP_MS(ms) Cy_SysLib_Delay(ms)
+#define XTPM_WAIT()   XSLEEP_MS(1)
 
 /* Infineon TPM 2.0 - SLB9673 (I2C) */
 #if 1 /* I2C */
@@ -50,12 +57,13 @@ extern "C" {
 #endif
 #define WOLFTPM_EXAMPLE_HAL
 #define WOLFTPM_FIRMWARE_UPGRADE
-
-#include <stdint.h>
-extern void Cy_SysLib_Delay(uint32_t milliseconds);
-extern void Cy_SysLib_DelayUs(uint16_t microseconds);
-#define XSLEEP_MS(ms) Cy_SysLib_Delay(ms)
-#define XTPM_WAIT()   XSLEEP_MS(1)
+#define TPM_TIMEOUT_TRIES 1000
+/* TPM small stack options */
+#define WOLFTPM_SMALL_STACK
+#define MAX_COMMAND_SIZE 1024
+#define MAX_RESPONSE_SIZE 1350
+#define WOLFTPM2_MAX_BUFFER 1500
+#define MAX_DIGEST_BUFFER 973
 
 
 /* TLS (allow TLS v1.3 or v1.2) */
@@ -174,9 +182,9 @@ extern void Cy_SysLib_DelayUs(uint16_t microseconds);
 #define WOLFSSL_NO_SHAKE256
 
 /* Logging */
+#define DEBUG_WOLFTPM
 #ifdef ENABLE_SECURE_SOCKETS_LOGS
     #define DEBUG_WOLFSSL
-    #define DEBUG_WOLFTPM
     //#define WOLFTPM_DEBUG_VERBOSE
     //#define WOLFTPM_DEBUG_IO
 #else

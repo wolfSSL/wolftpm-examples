@@ -65,7 +65,7 @@ TOOLCHAIN=GCC_ARM
 #
 # If CONFIG is manually edited, ensure to update or regenerate launch configurations
 # for your IDE.
-CONFIG=Debug
+CONFIG=Release
 
 # If set to "true" or "1", display full command-lines when building.
 VERBOSE=
@@ -109,6 +109,7 @@ DEFINES=$(WOLFSSLFLAGS) $(MBEDTLSFLAGS) CYBSP_WIFI_CAPABLE CY_RETARGET_IO_CONVER
 
 # Uncomment to enable TLS debugging
 #DEFINES+=ENABLE_SECURE_SOCKETS_LOGS
+#DEFINES+=ENABLE_HTTP_SERVER_LOGS
 
 # CY8CPROTO-062-4343W board shares the same GPIO for the user button (USER BTN1)
 # and the CYW4343W host wake up pin. Since this example uses the GPIO for
@@ -119,6 +120,8 @@ DEFINES=$(WOLFSSLFLAGS) $(MBEDTLSFLAGS) CYBSP_WIFI_CAPABLE CY_RETARGET_IO_CONVER
 # If you want this feature on CY8CPROTO-062-4343W, change the GPIO pin for USER BTN
 # in design/hardware & Comment DEFINES+=CY_WIFI_HOST_WAKE_SW_FORCE=0.
 DEFINES+=CY_WIFI_HOST_WAKE_SW_FORCE=0
+
+#DEFINES+=PRINT_HEAP_USAGE
 
 # Select softfp or hardfp floating point. Default is softfp.
 VFP_SELECT=

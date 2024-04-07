@@ -46,6 +46,7 @@
 /* FreeRTOS header file */
 #include <FreeRTOS.h>
 #include <task.h>
+#include <semphr.h>
 
 /* Cypress Secure Sockets header file */
 #include "cy_secure_sockets.h"
@@ -56,7 +57,10 @@
 #include "cy_wcm_error.h"
 
 /* Standard C header file */
+ #define _GNU_SOURCE
 #include <string.h>
+extern void *memmem(const void* haystack, size_t haystacklen,
+                    const void* needle, size_t needlelen);
 
 /* HTTPS server task header file. */
 #include "secure_http_server.h"
@@ -85,22 +89,18 @@ static cy_network_interface_t nw_interface;
 /* Holds the IP address and port number details of the socket for the HTTPS server. */
 static cy_socket_sockaddr_t https_ip_address;
 
+#ifdef HTTPS_PORT
 /* Holds the security configuration such as server certificate,
  * server key, and rootCA.
  */
 static cy_https_server_security_info_t security_config;
+#endif
 
 /* Holds the response handler for HTTPS GET and POST request from the client. */
 static cy_resource_dynamic_data_t https_get_post_resource;
 
 /* Holds the user data which adds/updates the URL data resources. */
 static cy_resource_dynamic_data_t https_put_resource;
-
-/* Queues the HTTPS PUT request to register new page resource in the server. */
-static QueueHandle_t register_resource_queue_handle;
-
-/* HTTPS new page resource name */
-static char resource_name[NEW_RESOURCE_NAME_LENGTH] = {0};
 
 /* Global variable to track number of resources registered. */
 static uint32_t number_of_resources_registered = 0;
@@ -124,40 +124,68 @@ static https_url_database_t url_resources_db[MAX_NUMBER_OF_HTTP_SERVER_RESOURCES
     { (char *)"/", NULL, 0 }
 };
 
-typedef struct {
-    byte*  manifest_buf;
-    byte*  firmware_buf;
-    size_t manifest_bufSz;
-    size_t firmware_bufSz;
-} fw_info_t;
 
+#define MAX_FIRMWARE_MANIFEST_SZ 4096
+
+#ifndef HTTP_SERVER_MTU_SIZE
+#define HTTP_SERVER_MTU_SIZE             (1460)
+#endif
+
+#define FW_UPDATE_TASK_STACK_SIZE        (5 * 1024)
+#define FW_UPDATE_TASK_PRIORITY          (1)
+
+#define IFX_FW_MAX_CHUNK_SZ 1024
+
+static TaskHandle_t fw_update_task_handle = NULL;
+
+typedef struct FirmwareChunk {
+    uint32_t sz;
+    uint8_t  buf[IFX_FW_MAX_CHUNK_SZ];
+} FirmwareChunk_t;
+
+typedef enum {
+    FW_STATE_INIT,
+    FW_STATE_MANIFEST_START,
+    FW_STATE_MANIFEST_DONE,
+    FW_STATE_FIRMWARE_DATA_START,
+    FW_STATE_FIRMWARE_DATA_CHUNK,
+    FW_STATE_FIRMWARE_DONE,
+    FW_STATE_FIRMWARE_REST
+} FwState;
+
+typedef enum {
+    FW_STATE_THREAD_INIT,
+    FW_STATE_THREAD_STARTED,
+    FW_STATE_THREAD_READY,
+    FW_STATE_THREAD_DONE,
+    FW_STATE_THREAD_FAILED
+} FwThreadState;
+
+typedef struct {
+    FwState state;
+    FwThreadState threadState;
+    int           threadRc;
+    TaskHandle_t  notifyHandle;
+    uint8_t manifest[MAX_FIRMWARE_MANIFEST_SZ];
+    size_t  manifestSz;
+    size_t  firmwareSz;
+    FirmwareChunk_t chunk;
+
+    char boundary[64];
+    char fieldName[64];
+    char fileName[64];
+} fw_info_t;
 static fw_info_t mFwInfo;
+
 
 /******************************************************************************
 * Function Prototypes
 *******************************************************************************/
 static cy_rslt_t configure_https_server(void);
 void print_heap_usage(char *msg);
-extern const char* TPM2_IFX_GetInfo(void);
+extern const char* TPM2_IFX_GetInfo(int* opMode);
+extern int TPM2_IFX_Init(void);
 
-
-#if 0 /* TODO: Add HTTP post callback */
-static int TPM2_IFX_FwData_Cb(uint8_t* data, uint32_t data_req_sz,
-    uint32_t offset, void* cb_ctx)
-{
-    fw_info_t* fwinfo = (fw_info_t*)cb_ctx;
-    if (offset > fwinfo->firmware_bufSz) {
-        return BUFFER_E;
-    }
-    if (offset + data_req_sz > (uint32_t)fwinfo->firmware_bufSz) {
-        data_req_sz = (uint32_t)fwinfo->firmware_bufSz - offset;
-    }
-    if (data_req_sz > 0) {
-        XMEMCPY(data, &fwinfo->firmware_buf[offset], data_req_sz);
-    }
-    return data_req_sz;
-}
-#endif
 
 /* Company Logo */
 #define INFINEON_LOGO \
@@ -238,9 +266,148 @@ INFINEON_LOGO \
 "</body>" \
 "</html>"
 
+//#define TEST_MODE
 
+/* Local Functions */
+static int TPM2_IFX_FwData_Cb(uint8_t* data, uint32_t data_req_sz,
+    uint32_t offset, void* cb_ctx)
+{
+    fw_info_t* fwInfo = (fw_info_t*)cb_ctx;
+    FirmwareChunk_t* fwChunk = NULL;
 
+    fwInfo->threadState = FW_STATE_THREAD_READY;
 
+#ifdef TEST_MODE
+    do {
+#endif
+
+    /* wait for chunk */
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    fwChunk = &fwInfo->chunk;
+
+    /* Process chunks */
+    if (data_req_sz > fwChunk->sz) {
+        data_req_sz = fwChunk->sz;
+    }
+    if (data_req_sz > 0) {
+        XMEMCPY(data, fwChunk->buf, data_req_sz);
+        fwInfo->firmwareSz += data_req_sz;
+    }
+
+#if 0
+    printf("Chunk %d (total %d)\r\n", (int)fwChunk->sz, fwInfo->firmwareSz);
+#endif
+
+    xTaskNotifyGive(fwInfo->notifyHandle);
+
+#ifdef TEST_MODE
+    } while (fwChunk->sz > 0);
+#endif
+
+    return data_req_sz;
+}
+
+static void fw_update_task(void *arg)
+{
+    int rc;
+    fw_info_t* fwInfo = (fw_info_t*)arg;
+
+    /* task has started */
+    fwInfo->threadState = FW_STATE_THREAD_STARTED;
+    fwInfo->threadRc = 0;
+
+    /* start the update process */
+    rc = wolfTPM2_FirmwareUpgrade(&mDev,
+        fwInfo->manifest, fwInfo->manifestSz,
+        TPM2_IFX_FwData_Cb, fwInfo);
+    if (rc != 0) {
+        printf("Infineon firmware update failed 0x%x: %s\n",
+            rc, TPM2_GetRCString(rc));
+        /* task failed */
+        fwInfo->threadState = FW_STATE_THREAD_FAILED;
+        fwInfo->threadRc = rc;
+    }
+    else {
+        printf("Infineon firmware update success!\n");
+        fwInfo->threadState = FW_STATE_THREAD_DONE;
+        fwInfo->threadRc = rc;
+    }
+
+    vTaskDelete(NULL); /* done with task */
+    fw_update_task_handle = NULL;
+}
+
+static char* parse_http_multipart_post(const char* header, char* boundary, char* fieldName, char* fileName)
+{
+    char* found = NULL, *start, *end = NULL;
+    size_t sz;
+    const char* boundaryStr = "------WebKitFormBoundary";
+    const char* contentDisp = "Content-Disposition: form-data;";
+    const char* nameStr = "name=\"";
+    const char* filenameStr = "filename=\"";
+    /* Content-Type: application/octet-stream */
+    /* Content-Type: application/x-ms-manifest */
+    const char* streamStr = "\r\n\r\n";
+
+    /* get boundary */
+    start = strstr(header, boundaryStr);
+    if (start != NULL) {
+        end = strstr(start, "\r\n");
+        if (end != NULL) {
+            sz = end-start;
+            if (sz > 64-1)
+                sz = 64-1;
+            memcpy(boundary, start, sz);
+            boundary[sz] = '\0'; /* null term */
+        }
+    }
+
+    if (end != NULL) {
+        /* find Content-Disposition */
+        start = strstr(end, contentDisp);
+        if (start != NULL) {
+            start += strlen(contentDisp);
+            /* find name=" " */
+            start = strstr(start, nameStr);
+            if (start != NULL) {
+                start += strlen(nameStr);
+                end = strstr(start, "\"");
+                if (end != NULL) {
+                    sz = end-start;
+                    if (sz > 64-1)
+                        sz = 64-1;
+                    memcpy(fieldName, start, sz);
+                    fieldName[sz] = '\0'; /* null term */
+                }
+            }
+        }
+    }
+
+    if (end != NULL) {
+        /* find filename */
+        start = strstr(end, filenameStr);
+        if (start != NULL) {
+            start += strlen(filenameStr);
+            end = strstr(start, "\"");
+            if (end != NULL) {
+                sz = end-start;
+                if (sz > 64-1)
+                    sz = 64-1;
+                memcpy(fileName, start, sz);
+                fileName[sz] = '\0'; /* null term */
+            }
+        }
+    }
+
+    if (end != NULL) {
+        /* locate start of data stream and return pointer to it */
+        found = strstr(end, streamStr);
+        if (found != NULL) {
+            found += strlen(streamStr);
+        }
+    }
+    return found;
+}
 
 /*******************************************************************************
  * Function Name: dynamic_resource_handler
@@ -273,9 +440,12 @@ int32_t dynamic_resource_handler(const char* url_path,
 {
     cy_rslt_t result = CY_RSLT_SUCCESS;
     int32_t status = HTTPS_REQUEST_HANDLE_SUCCESS;
-    char https_response[MAX_HTTP_RESPONSE_LENGTH] = {0};
-    char *register_new_resource = NULL;
+    char err_buf[MAX_STATUS_LENGTH];
     const char* msg;
+    size_t offset = 0;
+
+    err_buf[0] = '\0'; /* empty string */
+    cyhal_gpio_write(CYBSP_USER_LED, CYBSP_LED_STATE_ON);
 
     switch (https_message_body->request_type)
     {
@@ -287,7 +457,7 @@ int32_t dynamic_resource_handler(const char* url_path,
             result = cy_http_server_response_stream_write_payload(stream,
                 msg, strlen(msg));
             if (CY_RSLT_SUCCESS == result) {
-                msg = TPM2_IFX_GetInfo();
+                msg = TPM2_IFX_GetInfo(NULL);
                 result = cy_http_server_response_stream_write_payload(stream,
                     msg, strlen(msg));
             }
@@ -304,52 +474,287 @@ int32_t dynamic_resource_handler(const char* url_path,
         case CY_HTTP_REQUEST_POST:
             APP_INFO(("Received HTTPS POST request.\n"));
 
-            /* TODO: Upload the files using the */
+        #if 0
+            printf("https_message_body->data_length %d, remain %lu\r\n",
+                https_message_body->data_length,
+                https_message_body->data_remaining
+            );
             #if 0
-            rc = wolfTPM2_FirmwareUpgrade(&mDev,
-                fwinfo.manifest_buf, (uint32_t)fwinfo.manifest_bufSz,
-                TPM2_IFX_FwData_Cb, &mFwInfo);
+            if (mFwInfo.state == FW_STATE_INIT && https_message_body->data_length > 0) {
+                int i;
+                printf("HTTP Data:\r\n");
+                for (i=0; i<https_message_body->data_length; i++) {
+                    printf("%02x ", https_message_body->data[i]);
+                }
+                printf("\r\n");
+            }
             #endif
-            (void)mFwInfo;
+        #endif
 
-            /* Toggle the user LED. */
-            cyhal_gpio_toggle(CYBSP_USER_LED);
+            /* State Machine */
+            switch (mFwInfo.state) {
+                case FW_STATE_INIT:
+                    cyhal_gpio_write(CYBSP_USER_LED2, CYBSP_LED_STATE_ON);
 
-            /* Send the HTTPS response. */
-            result = cy_http_server_response_stream_write_payload(stream, https_response, sizeof(https_response));
-            if (CY_RSLT_SUCCESS != result)
-            {
-                ERR_INFO(("Failed to send the HTTPS POST response.\n"));
+                    /* parser manifest file */
+                    memset(&mFwInfo, 0, sizeof(mFwInfo));
+                    msg = parse_http_multipart_post((char*)https_message_body->data,
+                        mFwInfo.boundary, mFwInfo.fieldName, mFwInfo.fileName);
+                    if (msg != NULL) {
+                        printf("POST: Field: %s, File %s, Boundary %s\n",
+                            mFwInfo.fieldName, mFwInfo.fileName, mFwInfo.boundary);
+                        if (strcmp(mFwInfo.fieldName, "manifest") == 0) {
+                            offset = msg - (char*)https_message_body->data;
+                            if (offset > https_message_body->data_length)
+                                offset = https_message_body->data_length;
+                            mFwInfo.manifestSz = https_message_body->data_length - offset;
+                            if (mFwInfo.manifestSz > sizeof(mFwInfo.manifest))
+                                mFwInfo.manifestSz = sizeof(mFwInfo.manifest);
+                            memcpy(mFwInfo.manifest, msg, mFwInfo.manifestSz);
+                            mFwInfo.state = FW_STATE_MANIFEST_START;
+                            break;
+                        }
+                    }
+
+                    snprintf(err_buf, sizeof(err_buf),
+                        "POST manifest failed! Field: %s, File %s, Boundary %s\r\n",
+                        mFwInfo.fieldName, mFwInfo.fileName, mFwInfo.boundary);
+                    puts(err_buf);
+                    result = cy_http_server_response_stream_write_payload(stream, err_buf, strlen(err_buf));
+                    mFwInfo.state = FW_STATE_INIT;
+                    return HTTPS_REQUEST_HANDLE_ERROR;
+
+                case FW_STATE_MANIFEST_START:
+                    /* find end of boundary */
+                    msg = memmem(https_message_body->data, https_message_body->data_length,
+                        mFwInfo.boundary, strlen(mFwInfo.boundary));
+                    if (msg != NULL) {
+                        /* found end of stream */
+                        msg -= 2; /* backup \r\n */
+                        offset = msg - (char*)https_message_body->data;
+                        if (offset > https_message_body->data_length)
+                            offset = https_message_body->data_length;
+                        if (mFwInfo.manifestSz + offset < sizeof(mFwInfo.manifest)) {
+                            memcpy(&mFwInfo.manifest[mFwInfo.manifestSz], https_message_body->data, offset);
+                            mFwInfo.manifestSz += offset;
+
+                            /* advance state and fall though state machine below */
+                            mFwInfo.state = FW_STATE_MANIFEST_DONE;
+                        }
+                        else {
+                            snprintf(err_buf, sizeof(err_buf),
+                                "POST manifest end overrun! Manifest Sz %d, offset %d\r\n",
+                                mFwInfo.manifestSz, offset);
+                            puts(err_buf);
+                            result = cy_http_server_response_stream_write_payload(stream, err_buf, strlen(err_buf));
+                            mFwInfo.state = FW_STATE_INIT;
+                            return HTTPS_REQUEST_HANDLE_ERROR;
+                        }
+                    }
+                    else {
+                        /* copy all data */
+                        if (mFwInfo.manifestSz + https_message_body->data_length < sizeof(mFwInfo.manifest)) {
+                            memcpy(&mFwInfo.manifest[mFwInfo.manifestSz], https_message_body->data, https_message_body->data_length);
+                            mFwInfo.manifestSz += https_message_body->data_length;
+                        }
+                        else {
+                            snprintf(err_buf, sizeof(err_buf),
+                                "POST manifest middle overrun! Manifest Sz %d, Data %d\r\n",
+                                mFwInfo.manifestSz, https_message_body->data_length);
+                            puts(err_buf);
+                            result = cy_http_server_response_stream_write_payload(stream, err_buf, strlen(err_buf));
+                            mFwInfo.state = FW_STATE_INIT;
+                            return HTTPS_REQUEST_HANDLE_ERROR;
+                        }
+                        break;
+                    }
+                    /* fall-through */
+
+                case FW_STATE_MANIFEST_DONE:
+                    printf("Manifest data received: %d bytes\r\n", mFwInfo.manifestSz);
+
+                    /* get the current thread for fw data notifications */
+                    mFwInfo.notifyHandle = xTaskGetCurrentTaskHandle();
+
+                    /* start thread */
+                    printf("Starting firmware update task\r\n");
+                    xTaskCreate(fw_update_task, "FW Update", FW_UPDATE_TASK_STACK_SIZE,
+                        &mFwInfo, FW_UPDATE_TASK_PRIORITY, &fw_update_task_handle);
+                    /* wait for task to mark state as "ready" */
+                    while (mFwInfo.threadState != FW_STATE_THREAD_READY &&
+                           mFwInfo.threadState != FW_STATE_THREAD_FAILED) {
+                        vTaskDelay(1);
+                    }
+                    if (mFwInfo.threadState != FW_STATE_THREAD_READY) {
+                        snprintf(err_buf, sizeof(err_buf), "Update failed 0x%x: %s",
+                            mFwInfo.threadRc, TPM2_GetRCString(mFwInfo.threadRc));
+                        puts(err_buf);
+                        result = cy_http_server_response_stream_write_payload(stream, err_buf, strlen(err_buf));
+                        mFwInfo.state = FW_STATE_INIT;
+                        return HTTPS_REQUEST_HANDLE_ERROR;
+                    }
+
+                    mFwInfo.state = FW_STATE_FIRMWARE_DATA_START;
+                    /* fall-through */
+
+                case FW_STATE_FIRMWARE_DATA_START:
+                    /* parse for firmware file */
+                    memset(mFwInfo.boundary, 0, sizeof(mFwInfo.boundary));
+                    memset(mFwInfo.fieldName, 0, sizeof(mFwInfo.fieldName));
+                    memset(mFwInfo.fileName, 0, sizeof(mFwInfo.fileName));
+                    msg = parse_http_multipart_post((char*)&https_message_body->data[offset],
+                        mFwInfo.boundary, mFwInfo.fieldName, mFwInfo.fileName);
+                    if (msg != NULL) {
+                        printf("POST: Field: %s, File %s, Boundary %s\n",
+                            mFwInfo.fieldName, mFwInfo.fileName, mFwInfo.boundary);
+                        if (strcmp(mFwInfo.fieldName, "data") == 0) {
+                            /* copy start of firmware data info first chunk */
+                            offset = (size_t)msg - (size_t)https_message_body->data;
+                            mFwInfo.chunk.sz = https_message_body->data_length - offset;
+                            if (mFwInfo.chunk.sz > sizeof(mFwInfo.chunk.buf)) {
+                                mFwInfo.chunk.sz = sizeof(mFwInfo.chunk.buf);
+                                memcpy(mFwInfo.chunk.buf, &https_message_body->data[offset], mFwInfo.chunk.sz);
+                                if (mFwInfo.chunk.sz == sizeof(mFwInfo.chunk.buf)) {
+                                    xTaskNotifyGive(fw_update_task_handle);
+                                    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+                                    offset += mFwInfo.chunk.sz;
+                                }
+                                /* copy any remainder */
+                                mFwInfo.chunk.sz = https_message_body->data_length - offset;
+                                memcpy(mFwInfo.chunk.buf, &https_message_body->data[offset], mFwInfo.chunk.sz);
+                            }
+                            mFwInfo.state = FW_STATE_FIRMWARE_DATA_CHUNK;
+                            break;
+                        }
+                    }
+
+                    snprintf(err_buf, sizeof(err_buf),
+                        "POST firmware data failed! Field: %s, File %s, Boundary %s\r\n",
+                        mFwInfo.fieldName, mFwInfo.fileName, mFwInfo.boundary);
+                    puts(err_buf);
+                    result = cy_http_server_response_stream_write_payload(stream, err_buf, strlen(err_buf));
+                    mFwInfo.state = FW_STATE_INIT;
+                    return HTTPS_REQUEST_HANDLE_ERROR;
+
+                case FW_STATE_FIRMWARE_DATA_CHUNK:
+                    /* firmware data */
+                    /* try and fill chunk */
+                    offset = https_message_body->data_length;
+                    if (offset > sizeof(mFwInfo.chunk.buf) - mFwInfo.chunk.sz)
+                        offset = sizeof(mFwInfo.chunk.buf) - mFwInfo.chunk.sz;
+                    memcpy(&mFwInfo.chunk.buf[mFwInfo.chunk.sz], https_message_body->data, offset);
+                    mFwInfo.chunk.sz += offset;
+
+                    /* find end of boundary */
+                    msg = memmem(mFwInfo.chunk.buf, mFwInfo.chunk.sz,
+                        mFwInfo.boundary, strlen(mFwInfo.boundary));
+                    if (msg != NULL) {
+                        /* found end of stream */
+                        msg -= 2; /* backup \r\n */
+                        mFwInfo.chunk.sz = (size_t)msg - (size_t)mFwInfo.chunk.buf;
+
+                        /* sent last chunk */
+                        xTaskNotifyGive(fw_update_task_handle);
+                        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+                        mFwInfo.state = FW_STATE_FIRMWARE_DONE;
+                    }
+                    else {
+                        if (mFwInfo.chunk.sz == sizeof(mFwInfo.chunk.buf)) {
+                            xTaskNotifyGive(fw_update_task_handle);
+                            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+                            mFwInfo.chunk.sz = 0;
+                        }
+                        else {
+                            break; /* keep reading data */
+                        }
+                    }
+
+                    /* copy remainder */
+                    do {
+                        mFwInfo.chunk.sz = https_message_body->data_length - offset;
+                        if (mFwInfo.chunk.sz > sizeof(mFwInfo.chunk.buf))
+                            mFwInfo.chunk.sz = sizeof(mFwInfo.chunk.buf);
+                        memcpy(mFwInfo.chunk.buf, &https_message_body->data[offset], mFwInfo.chunk.sz);
+                        offset += mFwInfo.chunk.sz;
+                        if (mFwInfo.chunk.sz == sizeof(mFwInfo.chunk.buf)) {
+                            xTaskNotifyGive(fw_update_task_handle);
+                            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+                            mFwInfo.chunk.sz = 0;
+                        }
+                        else {
+                            /* leave remainder */
+                            break;
+                        }
+                    } while (offset < https_message_body->data_length);
+
+                    if (mFwInfo.state != FW_STATE_FIRMWARE_DONE) {
+                        break;
+                    }
+                    /* fall-through */
+
+                case FW_STATE_FIRMWARE_DONE:
+                    printf("Firmware data received: %d bytes\n", mFwInfo.firmwareSz);
+                    /* send last 0 byte chunk to finalize */
+                    mFwInfo.chunk.sz = 0;
+                    xTaskNotifyGive(fw_update_task_handle);
+                    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+                    /* wait for task to complete */
+                    while (mFwInfo.threadState != FW_STATE_THREAD_DONE &&
+                           mFwInfo.threadState != FW_STATE_THREAD_FAILED) {
+                        vTaskDelay(1);
+                    }
+                    if (mFwInfo.threadRc != 0) {
+                        break;
+                    }
+                    mFwInfo.state = FW_STATE_FIRMWARE_REST;
+                    /* fall-through */
+                case FW_STATE_FIRMWARE_REST:
+                    cyhal_gpio_write(CYBSP_USER_LED2, CYBSP_LED_STATE_OFF);
+                    cyhal_gpio_write(CYBSP_LED_RGB_GREEN, CYBSP_LED_STATE_ON);
+
+                    printf("Reset device\n");
+                    break;
+            }
+
+            if (https_message_body->data_remaining == 0) {
+                /* Send the HTTPS response. */
+                msg = HTTPS_STARTUP_HEADER;
+                result = cy_http_server_response_stream_write_payload(stream,
+                    msg, strlen(msg));
+                if (CY_RSLT_SUCCESS == result) {
+                    if (strlen(err_buf) == 0) {
+                        snprintf(err_buf, sizeof(err_buf),
+                            "Update result 0x%x: %s",
+                            mFwInfo.threadRc, TPM2_GetRCString(mFwInfo.threadRc));
+                    }
+                    msg = err_buf;
+                    result = cy_http_server_response_stream_write_payload(stream,
+                        msg, strlen(msg));
+                }
+                if (CY_RSLT_SUCCESS == result) {
+                    msg = HTTPS_STARTUP_FOOTER;
+                    result = cy_http_server_response_stream_write_payload(stream,
+                        msg, strlen(msg));
+                }
+                if (CY_RSLT_SUCCESS != result) {
+                    ERR_INFO(("Failed to send the HTTPS POST response.\n"));
+                }
+
+                mFwInfo.state = FW_STATE_INIT; /* reset state */
             }
             break;
 
         case CY_HTTP_REQUEST_PUT:
-            if (https_message_body->data_length > sizeof(resource_name))
-            {
-                /* Report the error response to the client. */
-                ERR_INFO(("Resource name length exceeded the limit. Maximum: %d, Received: %d",
-                    sizeof(resource_name), (https_message_body->data_length)));
-                sprintf(https_response, HTTPS_RESOURCE_PUT_ERROR, sizeof(resource_name));
 
-                /* Send the HTTPS error response. */
-                result = cy_http_server_response_stream_write_payload(stream, https_response, strlen(https_response));
-                if (CY_RSLT_SUCCESS != result)
-                {
-                    ERR_INFO(("Failed to send the HTTPS PUT error response.\n"));
-                }
-            }
-            else
+            /* Send the HTTPS error response. */
+            const char* putErrStr = "HTTP PUT not supported";
+            result = cy_http_server_response_stream_write_payload(stream,
+                putErrStr, strlen(putErrStr));
+            status = HTTPS_REQUEST_HANDLE_ERROR;
+            if (CY_RSLT_SUCCESS != result)
             {
-                register_new_resource = (char *)&resource_name[0];
-                memcpy(register_new_resource, (char *)https_message_body->data, https_message_body->data_length);
-
-                /* Received HTTPS PUT request. Put the message into queue
-                 * to register a new resource with the HTTPS server.
-                 */
-                if (pdTRUE != xQueueSend(register_resource_queue_handle, (void *)&register_new_resource, 0))
-                {
-                    ERR_INFO(("Failed to send queue message.\n"));
-                }
+                ERR_INFO(("Failed to send the HTTPS PUT error response.\n"));
             }
             break;
 
@@ -364,6 +769,7 @@ int32_t dynamic_resource_handler(const char* url_path,
     }
 
     print_heap_usage("At the end of GET/POST/PUT request handler");
+    cyhal_gpio_write(CYBSP_USER_LED, CYBSP_LED_STATE_OFF);
 
     return status;
 }
@@ -521,7 +927,7 @@ void register_https_resource(char *register_resource_name)
     }
 
     /* Clear the request buffer. */
-    memset(resource_name, 0, sizeof(resource_name));
+    //memset(resource_name, 0, sizeof(resource_name));
 }
 
 /*******************************************************************************
@@ -545,6 +951,7 @@ static cy_rslt_t configure_https_server(void)
 {
     cy_rslt_t result = CY_RSLT_SUCCESS;
 
+#ifdef HTTPS_PORT
     /*
      * Setup the necessary security configuration required for establishing
      * secure HTTP connection with the secure HTTP client. This example uses
@@ -559,6 +966,7 @@ static cy_rslt_t configure_https_server(void)
     security_config.key_length                 = strlen(keySERVER_PRIVATE_KEY_PEM);
     security_config.root_ca_certificate        = (uint8_t *)keyCLIENT_ROOTCA_PEM;
     security_config.root_ca_certificate_length = strlen(keyCLIENT_ROOTCA_PEM);
+#endif
 
     /* IP address of server. */
     https_ip_address.ip_address.ip.v4 = ip_addr.ip.v4;
@@ -572,7 +980,11 @@ static cy_rslt_t configure_https_server(void)
     result = cy_http_server_network_init();
 
     /* Allocate memory needed for secure HTTP server. */
+#ifdef HTTPS_PORT
     result = cy_http_server_create(&nw_interface, HTTPS_PORT, MAX_SOCKETS, &security_config, &https_server);
+#else
+    result = cy_http_server_create(&nw_interface, HTTP_PORT, MAX_SOCKETS, NULL, &https_server);
+#endif
     PRINT_AND_ASSERT(result, "Failed to allocate memory for the HTTPS server.\n");
 
     /* Configure dynamic resource handler. */
@@ -612,7 +1024,6 @@ static cy_rslt_t configure_https_server(void)
 void https_server_task(void *arg)
 {
     cy_rslt_t result = CY_RSLT_SUCCESS;
-    char *register_new_resource_name = NULL;
 
     (void)arg;
 
@@ -636,32 +1047,18 @@ void https_server_task(void *arg)
     result = cy_http_server_start(https_server);
     PRINT_AND_ASSERT(result, "Failed to start the HTTPS server.\n");
 
-    /* This queue is used to register a new HTTPS page resource when the HTTPS
-     * server receives a PUT request sent by the client.
-     */
-    register_resource_queue_handle = xQueueCreate(REGISTER_RESOURCE_QUEUE_LENGTH,
-                                                          sizeof(resource_name));
-
-    if (NULL == register_resource_queue_handle)
-    {
-        ERR_INFO(("Failed to create the queue.\n"));
-        CY_ASSERT(0);
-    }
-
+#ifdef HTTPS_PORT
     APP_INFO(("HTTPS server has successfully started. The server is running at "
               "URL https://%s.local:%d\n\n", HTTPS_SERVER_NAME, HTTPS_PORT));
+#else
+    APP_INFO(("HTTPS server has successfully started. The server is running at "
+            "URL http://%s.local:%d\n\n", HTTPS_SERVER_NAME, HTTP_PORT));
+#endif
 
-    /* Waits for a HTTPS PUT request from the client to register a new HTTPS page resource.*/
+    /* continue running HTTP server (handled through callbacks) */
     while(true)
     {
-        if (pdTRUE == xQueueReceive(register_resource_queue_handle,
-                                    &register_new_resource_name,
-                                    portMAX_DELAY))
-        {
-            APP_INFO(("New resource name register request: %s\n", register_new_resource_name));
-            register_https_resource(register_new_resource_name);
-            print_heap_usage("After registering a HTTP resource on receiving a PUT request");
-        }
+        vTaskDelay(10000/portTICK_PERIOD_MS);
     }
 }
 

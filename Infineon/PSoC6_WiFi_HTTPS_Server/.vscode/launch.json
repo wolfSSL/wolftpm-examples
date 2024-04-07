@@ -32,6 +32,60 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Launch PSoC6 CM4 (KitProg3_MiniProg4) - Release",
+            "type": "cortex-debug",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "executable": "./build/APP_CY8CEVAL-062S2-LAI-4373M2/Release/mtb-example-wifi-https-server.elf",
+            "servertype": "openocd",
+            "searchDir": [
+                "${workspaceFolder}",
+                "${config:modustoolbox.toolsPath}/openocd/scripts/",
+                "bsps/TARGET_APP_CY8CEVAL-062S2-LAI-4373M2/config/GeneratedSource"
+            ],
+            "configFiles": [
+                "openocd.tcl"
+            ],
+            "overrideLaunchCommands": [
+                "set mem inaccessible-by-default off",
+                "-enable-pretty-printing",
+                "set remotetimeout 15",
+                // Comment this next line out if you don't want to reload program
+                "monitor program {./build/APP_CY8CEVAL-062S2-LAI-4373M2/Release/mtb-example-wifi-https-server.hex}",
+                "monitor reset run",
+                "monitor psoc6 reset_halt sysresetreq"
+
+            ],
+            "numberOfProcessors": 2,
+            "targetProcessor": 1,// Set to 0 for the CM0+, set to 1 for the CM4
+            "postStartSessionCommands": [
+                // Needed if runToMain is false
+                // Following two commands are needed to get gdb and openocd and HW all in sync.
+                // Or, execution context (PC, stack, registers, etc.) look like they are from before reset.
+                // The stepi, is a pretend instruction that does not actually do a stepi, but MUST be done
+                // Its a documented workaround in openocd. Do a 'monitor help' to see more info
+                //
+                // An alternative command to use is "continue" instead of the following two
+                "monitor gdb_sync",
+                "stepi"
+            ],
+            "overrideRestartCommands": [
+                "starti"
+            ],
+            "postRestartSessionCommands": [
+            ],
+            // svdFile is optional, it can be very large.
+            "svdFile": "../mtb_shared/mtb-pdl-cat1/release-v3.9.0/devices/COMPONENT_CAT1A/svd/psoc6_02.svd",
+            "breakAfterReset": true,
+            "runToEntryPoint": "main",  // Specifies application entry point name where program will halt
+            "preLaunchTask": "Build",
+            "showDevDebugOutput": "none",
+            "presentation": {
+                "hidden": false,
+                "group": "CM4"
+            }
+        },
+        {
             "name": "Launch PSoC6 CM4 (KitProg3_MiniProg4)",
             "type": "cortex-debug",
             "request": "launch",
@@ -58,14 +112,14 @@
             ],
             "numberOfProcessors": 2,
             "targetProcessor": 1,// Set to 0 for the CM0+, set to 1 for the CM4
-            "postStartSessionCommands": [       
-                // Needed if runToMain is false 
-                // Following two commands are needed to get gdb and openocd and HW all in sync. 
-                // Or, execution context (PC, stack, registers, etc.) look like they are from before reset. 
-                // The stepi, is a pretend instruction that does not actually do a stepi, but MUST be done 
-                // Its a documented workaround in openocd. Do a 'monitor help' to see more info 
-                // 
-                // An alternative command to use is "continue" instead of the following two 
+            "postStartSessionCommands": [
+                // Needed if runToMain is false
+                // Following two commands are needed to get gdb and openocd and HW all in sync.
+                // Or, execution context (PC, stack, registers, etc.) look like they are from before reset.
+                // The stepi, is a pretend instruction that does not actually do a stepi, but MUST be done
+                // Its a documented workaround in openocd. Do a 'monitor help' to see more info
+                //
+                // An alternative command to use is "continue" instead of the following two
                 "monitor gdb_sync",
                 "stepi"
             ],
