@@ -1,6 +1,6 @@
-# Public wolfSSL Examples
+# Public wolfTPM Examples
 
-## Infineon PSoC6 wolfSSL HTTPS Server Example
+## Infineon PSoC6 wolfSSL HTTPS Server Example (using wolfTPM)
 
 See [Infineon/PSoC6_WiFi_HTTPS_Server](/Infineon/PSoC6_WiFi_HTTPS_Server).
 

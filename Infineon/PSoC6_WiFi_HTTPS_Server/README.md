@@ -1,4 +1,20 @@
-# HTTPS server
+# Infineon PSoC6 wolfSSL HTTPS Server Example (using wolfTPM)
+
+Tested on PSoC 62S2 eval kit (CY8CEVAL-062S2) and Sterling LWB5+ Wifi module.
+
+The wolfTPM support for updating Infineon SLB9672/SLB9673 firmware was added here: https://github.com/wolfSSL/wolfTPM/pull/339
+
+Based on the `Wi-Fi_HTTPS_Server` example. TLS ported to wolfSSL. TPM uses wolfTPM
+
+Build steps:
+* `make getlibs`
+* Update `../mtb_shared/secure-sockets` with https://github.com/Infineon/secure-sockets/pull/1
+* Update `../mtb_shared/wpa3-external-supplicant` with https://github.com/Infineon/wpa3-external-supplicant/pull/2
+* Update `bsps/TARGET_APP_CY8CEVAL-062S2-LAI-4373M2/config/GeneratedSource/cycfg_system.h` -> `#define CY_CFG_PWR_DEEPSLEEP_LATENCY 125UL`.
+* `make build -j8`
+
+
+## HTTPS server
 
 This code example demonstrates the implementation of an HTTPS server with PSoC&trade; 6 MCU and AIROC&trade; CYW43xxx Wi-Fi & Bluetooth&reg; combo chips.
 
@@ -513,7 +529,7 @@ Document title: *CE230422* - *HTTPS server*
  2.0.0   | Major update to support ModusToolbox&trade; v2.2 <br> Updated the application flow to handle HTTPS PUT request differently <br> This version is not backward compatible with ModusToolbox&trade; v2.1
  2.1.0   | Updated to support FreeRTOS 10.3.1
  2.2.0   | Added support for the kit CY8CEVAL-062S2-LAI-4373M2 <br>Adding fixes for mDNS errors
- 3.0.0   | Updated to BSP v3.X and added support for new kits 
+ 3.0.0   | Updated to BSP v3.X and added support for new kits
  4.0.0   | Major update to support ModusToolbox&trade; v3.0. This version is not backward compatible with previous versions of ModusToolbox&trade;
  4.1.0   | Added support for the kit CY8CKIT-064B0S2-4343W and CY8CEVAL-062S2-LAI-43439M2
  4.2.0   | Added support for KIT_XMC72_EVK_MUR_43439M2 <br> Updated to support mbedtls v3.4.0 and ModusToolbox&trade; v3.1.
