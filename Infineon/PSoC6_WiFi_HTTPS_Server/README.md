@@ -11,8 +11,10 @@ Build steps:
 * Update `../mtb_shared/secure-sockets` with https://github.com/Infineon/secure-sockets/pull/1
 * Update `../mtb_shared/wpa3-external-supplicant` with https://github.com/Infineon/wpa3-external-supplicant/pull/2
 * Update `bsps/TARGET_APP_CY8CEVAL-062S2-LAI-4373M2/config/GeneratedSource/cycfg_system.h` -> `#define CY_CFG_PWR_DEEPSLEEP_LATENCY 125UL`.
+* Update `source/secure_http_server.h` WiFi settings (`WIFI_SSID` and `WIFI_PASSWORD`)
 * `make build -j8`
-
+* `make program`
+* See [wolfTPM Firmware Example](https://github.com/wolfSSL/wolfTPM/tree/master/examples/firmware) for next steps
 
 ## HTTPS server
 

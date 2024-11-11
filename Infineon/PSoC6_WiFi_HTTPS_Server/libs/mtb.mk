@@ -37,7 +37,8 @@ SEARCH_recipe-make-cat1a=../mtb_shared/recipe-make-cat1a/release-v2.2.0
 SEARCH_secure-sockets=../mtb_shared/secure-sockets/release-v3.4.0
 SEARCH_whd-bsp-integration=../mtb_shared/whd-bsp-integration/release-v2.2.1
 SEARCH_wifi-connection-manager=../mtb_shared/wifi-connection-manager/release-v3.3.0
-SEARCH_wifi-host-driver=../mtb_shared/wifi-host-driver/release-v3.0.0
+SEARCH_wifi-host-driver=../mtb_shared/wifi-host-driver/release-v4.2.0
+SEARCH_wifi-resources=../mtb_shared/wifi-resources/release-v1.0.0
 SEARCH_wpa3-external-supplicant=../mtb_shared/wpa3-external-supplicant/release-v1.2.0
 
 # Search libraries added to build
@@ -69,6 +70,7 @@ SEARCH_MTB_MK+=$(SEARCH_secure-sockets)
 SEARCH_MTB_MK+=$(SEARCH_whd-bsp-integration)
 SEARCH_MTB_MK+=$(SEARCH_wifi-connection-manager)
 SEARCH_MTB_MK+=$(SEARCH_wifi-host-driver)
+SEARCH_MTB_MK+=$(SEARCH_wifi-resources)
 SEARCH_MTB_MK+=$(SEARCH_wpa3-external-supplicant)
 
 -include $(CY_INTERNAL_APP_PATH)/importedbsp.mk
@@ -100,6 +102,7 @@ COMPONENTS += MW_SECURE_SOCKETS
 COMPONENTS += MW_WHD_BSP_INTEGRATION
 COMPONENTS += MW_WIFI_CONNECTION_MANAGER
 COMPONENTS += MW_WIFI_HOST_DRIVER
+COMPONENTS += MW_WIFI_RESOURCES
 COMPONENTS += MW_WPA3_EXTERNAL_SUPPLICANT
 
 # Register map file

@@ -94,6 +94,17 @@ extern void Cy_SysLib_DelayUs(uint16_t microseconds);
     #define WOLFSSL_HAVE_SP_RSA
     #define WOLFSSL_HAVE_SP_ECC
     #define WOLFSSL_SP_SMALL
+
+    #if 0 /* ARM assembly speedups */
+        #define WOLFSSL_SP_ARM_CORTEX_M_ASM
+
+        #define WOLFSSL_ARMASM
+        #define WOLFSSL_ARMASM_INLINE
+        #define WOLFSSL_ARMASM_NO_HW_CRYPTO
+        #define WOLFSSL_ARMASM_NO_NEON
+        #define WOLFSSL_ARM_ARCH 7
+        #define WOLFSSL_ARMASM_THUMB2
+    #endif
 #endif
 
 #if 0

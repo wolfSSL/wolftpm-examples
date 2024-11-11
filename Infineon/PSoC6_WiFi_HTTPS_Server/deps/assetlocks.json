@@ -73,7 +73,11 @@
     },
     {
         "asset-name": "wifi-host-driver",
-        "locked-commit": "release-v3.0.0"
+        "locked-commit": "release-v4.2.0"
+    },
+    {
+        "asset-name": "wifi-resources",
+        "locked-commit": "release-v1.0.0"
     },
     {
         "asset-name": "wpa3-external-supplicant",

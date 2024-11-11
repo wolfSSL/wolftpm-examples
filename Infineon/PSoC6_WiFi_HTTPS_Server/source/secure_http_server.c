@@ -964,8 +964,8 @@ static cy_rslt_t configure_https_server(void)
     security_config.certificate_length         = strlen(keySERVER_CERTIFICATE_PEM);
     security_config.private_key                = (uint8_t *)keySERVER_PRIVATE_KEY_PEM;
     security_config.key_length                 = strlen(keySERVER_PRIVATE_KEY_PEM);
-    security_config.root_ca_certificate        = (uint8_t *)keyCLIENT_ROOTCA_PEM;
-    security_config.root_ca_certificate_length = strlen(keyCLIENT_ROOTCA_PEM);
+    security_config.root_ca_certificate        = NULL; //(uint8_t *)keyCLIENT_ROOTCA_PEM;
+    security_config.root_ca_certificate_length = 0; //strlen(keyCLIENT_ROOTCA_PEM);
 #endif
 
     /* IP address of server. */
