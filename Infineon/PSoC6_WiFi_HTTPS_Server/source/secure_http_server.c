@@ -310,16 +310,31 @@ static int TPM2_IFX_FwData_Cb(uint8_t* data, uint32_t data_req_sz,
 static void fw_update_task(void *arg)
 {
     int rc;
+    int opMode = 0, recovery = 0;
     fw_info_t* fwInfo = (fw_info_t*)arg;
+    (void)TPM2_IFX_GetInfo(&opMode);
+    if (opMode == 0x02 || (opMode & 0x80)) {
+        /* if opmode == 2 or 0x8x then we need to use recovery mode */
+        recovery = 1;
+    }
 
     /* task has started */
     fwInfo->threadState = FW_STATE_THREAD_STARTED;
     fwInfo->threadRc = 0;
 
     /* start the update process */
-    rc = wolfTPM2_FirmwareUpgrade(&mDev,
-        fwInfo->manifest, fwInfo->manifestSz,
-        TPM2_IFX_FwData_Cb, fwInfo);
+    if (recovery) {
+        printf("Firmware Update (recovery mode):\n");
+        rc = wolfTPM2_FirmwareUpgradeRecover(&mDev,
+            fwInfo->manifest, fwInfo->manifestSz,
+            TPM2_IFX_FwData_Cb, fwInfo);
+    }
+    else {
+        printf("Firmware Update (normal mode):\n");
+        rc = wolfTPM2_FirmwareUpgrade(&mDev,
+            fwInfo->manifest, fwInfo->manifestSz,
+            TPM2_IFX_FwData_Cb, fwInfo);
+    }
     if (rc != 0) {
         printf("Infineon firmware update failed 0x%x: %s\n",
             rc, TPM2_GetRCString(rc));
