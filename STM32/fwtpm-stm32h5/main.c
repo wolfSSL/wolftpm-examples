@@ -533,6 +533,31 @@ static void MX_RNG_Init(void)
     }
 }
 
+/* wolfCrypt entropy source using STM32 hardware RNG */
+int custom_rand_gen_block(unsigned char* output, unsigned int sz)
+{
+    uint32_t word;
+    while (sz >= 4) {
+        if (HAL_RNG_GenerateRandomNumber(&hrng, &word) != HAL_OK)
+            return -1;
+        output[0] = (unsigned char)word;
+        output[1] = (unsigned char)(word >> 8);
+        output[2] = (unsigned char)(word >> 16);
+        output[3] = (unsigned char)(word >> 24);
+        output += 4;
+        sz -= 4;
+    }
+    if (sz > 0) {
+        if (HAL_RNG_GenerateRandomNumber(&hrng, &word) != HAL_OK)
+            return -1;
+        while (sz-- > 0) {
+            *output++ = (unsigned char)word;
+            word >>= 8;
+        }
+    }
+    return 0;
+}
+
 static void Error_Handler(void)
 {
     __disable_irq();

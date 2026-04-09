@@ -97,9 +97,12 @@
 #define WOLFSSL_SHA512
 #define HAVE_SHA512
 
-/* RNG */
+/* RNG: use STM32 hardware RNG directly via custom callback */
 #define HAVE_HASHDRBG
+#define WC_RESEED_INTERVAL (1000000)
 #define NO_OLD_RNGNAME
+#define CUSTOM_RAND_GENERATE_BLOCK custom_rand_gen_block
+extern int custom_rand_gen_block(unsigned char* output, unsigned int sz);
 
 /* ========================================================================= */
 /* wolfSSL / Platform features                                               */

@@ -64,6 +64,7 @@ else
 CFLAGS += -Wall -Os -g -ffunction-sections -fdata-sections -fno-common
 CFLAGS += -specs=nano.specs
 endif
+CFLAGS += $(EXTRA_CFLAGS)
 ASFLAGS = $(CPU) -g
 
 # Include paths
