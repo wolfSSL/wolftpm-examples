@@ -37,7 +37,7 @@ int FWTPM_NSC_ExecuteCommand(const uint8_t* cmdBuf, uint32_t cmdSz,
     if (ctx == NULL || cmdBuf == NULL || rspBuf == NULL || rspSz == NULL) {
         return -1;
     }
-    if (cmdSz > FWTPM_MAX_COMMAND_SIZE || *rspSz < FWTPM_MAX_COMMAND_SIZE) {
+    if (cmdSz > FWTPM_MAX_COMMAND_SIZE || *rspSz == 0) {
         return -2;
     }
 
@@ -80,7 +80,32 @@ int FWTPM_NSC_ExecuteCommand(const uint8_t* cmdBuf, uint32_t cmdSz,
 }
 
 FWTPM_NSC_ENTRY
-const char* FWTPM_NSC_GetVersion(void)
+int FWTPM_NSC_GetVersion(char* versionBuf, uint32_t versionBufSz)
 {
-    return FWTPM_GetVersionString();
+    const char* version;
+    size_t versionLen;
+
+    if (versionBuf == NULL || versionBufSz == 0) {
+        return -1;
+    }
+
+#if defined(__ARM_FEATURE_CMSE) && (__ARM_FEATURE_CMSE == 3U)
+    if (cmse_check_address_range(versionBuf, versionBufSz,
+            CMSE_NONSECURE | CMSE_MPU_READWRITE) == NULL) {
+        return -2;
+    }
+#endif
+
+    version = FWTPM_GetVersionString();
+    if (version == NULL) {
+        return -3;
+    }
+
+    versionLen = strlen(version) + 1;
+    if (versionLen > versionBufSz) {
+        return -4;
+    }
+
+    memcpy(versionBuf, version, versionLen);
+    return 0;
 }

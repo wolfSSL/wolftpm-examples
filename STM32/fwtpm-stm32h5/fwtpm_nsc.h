@@ -25,8 +25,11 @@ extern "C" {
 int FWTPM_NSC_ExecuteCommand(const uint8_t* cmdBuf, uint32_t cmdSz,
                               uint8_t* rspBuf, uint32_t* rspSz);
 
-/* Get fwTPM version string. */
-const char* FWTPM_NSC_GetVersion(void);
+/* Get fwTPM version string.
+ * versionBuf: caller-provided buffer (non-secure accessible)
+ * versionBufSz: size of buffer in bytes
+ * Returns 0 on success, negative on error. */
+int FWTPM_NSC_GetVersion(char* versionBuf, uint32_t versionBufSz);
 
 #ifdef __cplusplus
 }

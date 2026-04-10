@@ -76,9 +76,10 @@ static int StmFlashWrite(void* ctx, word32 offset, const byte* buf,
         chunkSz = size - written;
 
         if (chunkSz >= FWTPM_NV_FLASH_PROGRAM_SIZE) {
-            /* Full quadword write */
+            /* Full quadword write via aligned staging buffer */
+            memcpy(alignBuf, buf + written, FWTPM_NV_FLASH_PROGRAM_SIZE);
             status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_QUADWORD,
-                addr, (uint32_t)(uintptr_t)(buf + written));
+                addr, (uint32_t)(uintptr_t)alignBuf);
             written += FWTPM_NV_FLASH_PROGRAM_SIZE;
         }
         else {
@@ -108,18 +109,21 @@ static int StmFlashErase(void* ctx, word32 offset, word32 size)
     HAL_StatusTypeDef status;
     FLASH_EraseInitTypeDef eraseInit;
     uint32_t sectorError = 0;
+    uint32_t physAddr;
+    uint32_t bankBase;
     uint32_t startSector;
     uint32_t numSectors;
     (void)ctx;
     (void)offset;
     (void)size;
 
-    /* Calculate sector numbers based on absolute address.
-     * Physical flash base is 0x08000000 regardless of TZ aliasing. */
+    /* Calculate physical flash address (remove TZ secure alias if present).
+     * STM32H563: Bank 1 = 0x08000000-0x080FFFFF,
+     *            Bank 2 = 0x08100000-0x081FFFFF */
 #if TZEN_ENABLED
-    startSector = (FWTPM_NV_FLASH_BASE - 0x0C000000) / FWTPM_NV_FLASH_SECTOR_SIZE;
+    physAddr = FWTPM_NV_FLASH_BASE - 0x0C000000 + 0x08000000;
 #else
-    startSector = (FWTPM_NV_FLASH_BASE - 0x08000000) / FWTPM_NV_FLASH_SECTOR_SIZE;
+    physAddr = FWTPM_NV_FLASH_BASE;
 #endif
     numSectors = FWTPM_NV_FLASH_SIZE / FWTPM_NV_FLASH_SECTOR_SIZE;
 
@@ -132,8 +136,18 @@ static int StmFlashErase(void* ctx, word32 offset, word32 size)
         return TPM_RC_FAILURE;
     }
 
+    /* Select bank and compute sector index relative to bank start */
+    if (physAddr >= 0x08100000) {
+        bankBase = 0x08100000;
+        eraseInit.Banks = FLASH_BANK_2;
+    }
+    else {
+        bankBase = 0x08000000;
+        eraseInit.Banks = FLASH_BANK_1;
+    }
+    startSector = (physAddr - bankBase) / FWTPM_NV_FLASH_SECTOR_SIZE;
+
     eraseInit.TypeErase = FLASH_TYPEERASE_SECTORS;
-    eraseInit.Banks = FLASH_BANK_1;
     eraseInit.Sector = startSector;
     eraseInit.NbSectors = numSectors;
 

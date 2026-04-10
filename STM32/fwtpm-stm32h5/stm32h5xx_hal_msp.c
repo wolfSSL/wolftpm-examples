@@ -49,7 +49,9 @@ void HAL_RNG_MspInit(RNG_HandleTypeDef* hrng)
         /* Select HSI48 as RNG clock source */
         PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_RNG;
         PeriphClkInit.RngClockSelection = RCC_RNGCLKSOURCE_HSI48;
-        HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit);
+        if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK) {
+            while (1) {} /* Clock config failed */
+        }
 
         __HAL_RCC_RNG_CLK_ENABLE();
     }

@@ -328,6 +328,13 @@ static void FwTPM_UartCommandLoop(FWTPM_CTX* ctx)
             cmdSize = LoadU32BE(ctx->cmdBuf + 2);
 
             if (cmdSize < 10 || cmdSize > FWTPM_MAX_COMMAND_SIZE) {
+                /* Send minimal TPM error response so client doesn't hang */
+                static const uint8_t errRsp[10] = {
+                    0x80, 0x01,             /* tag: TPM_ST_NO_SESSIONS */
+                    0x00, 0x00, 0x00, 0x0A, /* size: 10 */
+                    0x00, 0x00, 0x01, 0x01  /* rc: TPM_RC_FAILURE */
+                };
+                UartSend(errRsp, sizeof(errRsp));
                 continue;
             }
 

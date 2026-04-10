@@ -59,7 +59,7 @@ endif
 ifeq ($(SEMIHOSTING),1)
 CFLAGS += -DARM_SEMIHOSTING -DDEBUG_WOLFTPM
 CFLAGS += -Wall -Os -g -ffunction-sections -fdata-sections -fno-common
-CFLAGS += --specs=rdimon.specs
+CFLAGS += -specs=rdimon.specs
 else
 CFLAGS += -Wall -Os -g -ffunction-sections -fdata-sections -fno-common
 CFLAGS += -specs=nano.specs
