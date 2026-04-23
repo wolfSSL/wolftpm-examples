@@ -53,9 +53,17 @@ static int StmFlashWrite(void* ctx, word32 offset, const byte* buf,
     HAL_StatusTypeDef status;
     uint32_t addr;
     word32 written = 0;
-    byte alignBuf[FWTPM_NV_FLASH_PROGRAM_SIZE];
+    /* STM32H5 quadword programming requires the source pointer to be
+     * 16-byte aligned. Default GCC stack alignment for byte[] is 8. */
+    byte alignBuf[FWTPM_NV_FLASH_PROGRAM_SIZE]
+        __attribute__((aligned(FWTPM_NV_FLASH_PROGRAM_SIZE)));
     word32 chunkSz;
     (void)ctx;
+
+    /* Destination address must also be quadword-aligned. */
+    if ((offset % FWTPM_NV_FLASH_PROGRAM_SIZE) != 0) {
+        return TPM_RC_FAILURE;
+    }
 
     if (offset + size > FWTPM_NV_FLASH_SIZE) {
         return TPM_RC_FAILURE;

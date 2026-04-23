@@ -120,6 +120,7 @@
 
 #include "stm32h5xx.h"
 #include "partition_stm32h563xx.h"  /* H563-specific SAU/TZ configuration */
+#include <math.h>  /* float_t */
 
 /**
   * @}

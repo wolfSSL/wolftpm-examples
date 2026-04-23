@@ -4,9 +4,19 @@
  * Initializes clocks, peripherals, TrustZone isolation, and runs the fwTPM
  * with a UART command interface for development/testing.
  *
- * UART protocol (length-prefixed):
- *   Host -> Device: [U32BE cmdLen][cmdPayload]
- *   Device -> Host: [U32BE rspLen][rspPayload]
+ * UART protocol: see FwTPM_UartCommandLoop() in this file. Two framings
+ * are auto-detected from the first 4 bytes of each request:
+ *
+ *   1) Raw swtpm framing — the host sends a TPM command packet directly
+ *      (starting with tag 0x8001 / 0x8002); the device sends back the
+ *      raw TPM response packet.
+ *
+ *   2) Microsoft simulator (mssim) framing — compatible with the
+ *      wolfTPM swtpm client:
+ *        cmd : [U32BE cmdCode][U8 locality][U32BE cmdSize][cmdPayload]
+ *        rsp : [U32BE rspSize][rspPayload][U32BE ack=0]
+ *      Platform signals (POWER_ON/OFF, RESET, SESSION_END, STOP) are
+ *      also accepted in this form.
  *
  * Copyright (C) 2006-2025 wolfSSL Inc.
  *

@@ -25,7 +25,7 @@
 
   .syntax unified
 	.cpu cortex-m33
-	.fpu softvfp
+	.fpu fpv5-sp-d16
 	.thumb
 
 .global g_pfnVectors

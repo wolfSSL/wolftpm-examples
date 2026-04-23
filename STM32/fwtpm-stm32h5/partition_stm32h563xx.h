@@ -48,7 +48,7 @@
 //   <q> Enable SAU
 //   <i> Value for SAU->CTRL register bit ENABLE
 */
-#define SAU_INIT_CTRL_ENABLE   0
+#define SAU_INIT_CTRL_ENABLE   1
 
 /*
 //   <o> When SAU is disabled
@@ -76,7 +76,7 @@
 //   <e>Initialize SAU Region 0
 //   <i> Setup SAU Region 0 memory attributes
 */
-#define SAU_INIT_REGION0    0
+#define SAU_INIT_REGION0    1   /* NSC stub region (matches FLASH_NSC) */
 
 /*
 //     <o>Start Address <0-0xFFFFFFE0>
@@ -102,7 +102,7 @@
 //   <e>Initialize SAU Region 1
 //   <i> Setup SAU Region 1 memory attributes
 */
-#define SAU_INIT_REGION1    0
+#define SAU_INIT_REGION1    1   /* Non-secure flash (Bank 2) */
 
 /*
 //     <o>Start Address <0-0xFFFFFFE0>
@@ -128,7 +128,7 @@
 //   <e>Initialize SAU Region 2
 //   <i> Setup SAU Region 2 memory attributes
 */
-#define SAU_INIT_REGION2    0
+#define SAU_INIT_REGION2    1   /* Non-secure SRAM (upper half) */
 
 /*
 //     <o>Start Address <0-0xFFFFFFE0>
@@ -154,7 +154,7 @@
 //   <e>Initialize SAU Region 3
 //   <i> Setup SAU Region 3 memory attributes
 */
-#define SAU_INIT_REGION3    0
+#define SAU_INIT_REGION3    1   /* Non-secure peripheral aperture */
 
 /*
 //     <o>Start Address <0-0xFFFFFFE0>

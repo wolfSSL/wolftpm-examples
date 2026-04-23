@@ -2,9 +2,11 @@
 """
 UART TPM 2.0 Test Client for fwTPM STM32 Port
 
-Sends TPM commands over serial using length-prefixed protocol:
-  Host -> Device: [U32BE cmdLen][cmdPayload]
-  Device -> Host: [U32BE rspLen][rspPayload]
+Speaks the raw swtpm framing implemented by FwTPM_UartCommandLoop()
+in main.c: a TPM command packet is sent verbatim over the UART (starting
+with tag 0x8001 / 0x8002), and the device replies with the raw TPM
+response packet. The 10-byte TPM response header (tag, size, rc) is
+parsed to determine how many bytes to read.
 
 Usage:
   python3 test_uart_tpm.py [/dev/ttyACM0]
@@ -21,6 +23,9 @@ import time
 DEFAULT_PORT = "/dev/ttyACM0"
 BAUD_RATE = 115200
 TIMEOUT = 5  # seconds
+
+# Sanity cap on TPM response size (matches FWTPM_MAX_COMMAND_SIZE order)
+MAX_TPM_RSP_SIZE = 4096
 
 # TPM 2.0 command codes
 TPM_ST_NO_SESSIONS = 0x8001
@@ -41,31 +46,50 @@ def build_tpm_cmd(cc, payload=b""):
     return struct.pack(">HII", TPM_ST_NO_SESSIONS, size, cc) + payload
 
 
+def _read_exact(ser, nbytes):
+    """Read exactly nbytes from ser, looping until full or timeout fires."""
+    deadline = time.monotonic() + TIMEOUT
+    buf = bytearray()
+    while len(buf) < nbytes:
+        chunk = ser.read(nbytes - len(buf))
+        if chunk:
+            buf.extend(chunk)
+            continue
+        if time.monotonic() >= deadline:
+            return bytes(buf)
+    return bytes(buf)
+
+
 def send_tpm_cmd(ser, cmd):
-    """Send a TPM command over UART and receive the response."""
-    # Send length-prefixed command
-    hdr = struct.pack(">I", len(cmd))
-    ser.write(hdr + cmd)
+    """Send a raw TPM command over UART and receive the raw TPM response.
+    The first 10 bytes of the response are the TPM header (tag, size, rc);
+    `size` tells us how much more (size - 10) to read."""
+    ser.write(cmd)
     ser.flush()
 
-    # Read 4-byte response length
-    rsp_hdr = ser.read(4)
-    if len(rsp_hdr) < 4:
-        print(f"  ERROR: Timeout reading response header (got {len(rsp_hdr)} bytes)")
+    # Read 10-byte TPM response header: tag(2) + size(4) + rc(4)
+    rsp_hdr = _read_exact(ser, 10)
+    if len(rsp_hdr) < 10:
+        print(f"  ERROR: Timeout reading TPM response header "
+              f"(got {len(rsp_hdr)} bytes)")
         return None
 
-    rsp_len = struct.unpack(">I", rsp_hdr)[0]
-    if rsp_len == 0:
-        print("  ERROR: Zero-length response")
+    rsp_size = struct.unpack(">I", rsp_hdr[2:6])[0]
+    if rsp_size < 10 or rsp_size > MAX_TPM_RSP_SIZE:
+        print(f"  ERROR: Invalid response size {rsp_size}")
         return None
 
-    # Read response payload
-    rsp = ser.read(rsp_len)
-    if len(rsp) < rsp_len:
-        print(f"  ERROR: Short response ({len(rsp)}/{rsp_len} bytes)")
+    remaining = rsp_size - 10
+    if remaining == 0:
+        return rsp_hdr
+
+    rsp_body = _read_exact(ser, remaining)
+    if len(rsp_body) < remaining:
+        print(f"  ERROR: Short response body "
+              f"({len(rsp_body)}/{remaining} bytes)")
         return None
 
-    return rsp
+    return rsp_hdr + rsp_body
 
 
 def parse_tpm_rsp(rsp):

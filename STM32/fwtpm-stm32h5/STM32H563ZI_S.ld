@@ -33,7 +33,7 @@ ENTRY(Reset_Handler)
 
 _estack = ORIGIN(RAM) + LENGTH(RAM);
 
-_Min_Heap_Size  = 0x30000;  /* 192KB heap for FWTPM_CTX + wolfCrypt */
+_Min_Heap_Size  = 0x18000;  /* 96KB heap (matches TZEN=0 budget) */
 _Min_Stack_Size = 0x10000;  /* 64KB stack (RSA keygen needs headroom) */
 
 MEMORY
@@ -166,13 +166,6 @@ SECTIONS
     . = . + _Min_Stack_Size;
     . = ALIGN(8);
   } >RAM
-
-  /DISCARD/ :
-  {
-    libc.a ( * )
-    libm.a ( * )
-    libgcc.a ( * )
-  }
 
   .ARM.attributes 0 : { *(.ARM.attributes) }
 }

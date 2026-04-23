@@ -7,7 +7,7 @@ Supports TrustZone (CMSE) for hardware-isolated TPM secrets.
 
 | Board | Chip | Status | Date |
 |-------|------|--------|------|
-| NUCLEO-H563ZI | STM32H563ZI (Cortex-M33, 250MHz) | Working (ECC OK, RSA keygen investigating) | 2026-03-20 |
+| NUCLEO-H563ZI | STM32H563ZI (Cortex-M33, 250MHz) | TZEN=0 and TZEN=1 verified (Startup, SelfTest, GetRandom, GetCapability) | 2026-04-23 |
 
 ## Prerequisites
 
@@ -28,6 +28,9 @@ make
 make SEMIHOSTING=1
 
 # TrustZone enabled (requires TZEN option byte set)
+# Flip the option byte once with:
+#   STM32_Programmer_CLI -c port=swd mode=hotplug -ob TZEN=0xB4
+# Then power-cycle. Use TZEN=0xC3 to revert to non-TrustZone.
 make TZEN=1
 
 # Override wolfSSL path
@@ -147,7 +150,8 @@ the CPU briefly while OpenOCD reads the output via SWD.
 ## Python Test Script
 
 A standalone test script is included for quick verification without building
-the wolfTPM client library:
+the wolfTPM client library. It speaks the raw swtpm framing implemented by
+`FwTPM_UartCommandLoop()` (TPM packets sent verbatim over the UART):
 
 ```bash
 python3 test_uart_tpm.py /dev/ttyACM0
@@ -155,14 +159,28 @@ python3 test_uart_tpm.py /dev/ttyACM0
 
 Tests: TPM2_Startup, TPM2_SelfTest, TPM2_GetRandom, TPM2_GetCapability.
 
+## RAM Budget (both TZEN=0 and TZEN=1)
+
+Both linker scripts reserve the same heap and stack so behavior matches
+across configurations:
+
+| Region | Size | Notes |
+|--------|------|-------|
+| BSS (incl. FWTPM_CTX) | ~94KB | static buffers |
+| Heap reservation | 96KB | wolfCrypt RSA keygen / TPM ops (`_Min_Heap_Size`) |
+| Stack reservation | 64KB | top of RAM (`_Min_Stack_Size`) |
+| **Total RAM used** | ~254KB | |
+
+TZEN=0 has 640KB SRAM available (386KB headroom). TZEN=1 has 320KB
+Secure SRAM available (66KB headroom).
+
 ## Memory Map (TZEN=0)
 
 | Region | Address | Size | Contents |
 |--------|---------|------|----------|
-| Code + rodata | 0x08000000 | ~184KB | fwTPM + wolfCrypt + STM32 HAL |
+| Code + rodata | 0x08000000 | ~196KB | fwTPM + wolfCrypt + STM32 HAL |
 | NV flash | 0x081E0000 | 128KB | TLV journal (seeds, keys, PCRs) |
-| RAM (BSS+heap+stack) | 0x20000000 | ~263KB | FWTPM_CTX (heap) + 64KB stack |
-| **Available** | | **377KB RAM, 1608KB flash** | |
+| RAM | 0x20000000 | 640KB | BSS + heap + stack (see budget above) |
 
 ## TrustZone Memory Map (TZEN=1)
 
@@ -172,7 +190,7 @@ Tests: TPM2_Startup, TPM2_SelfTest, TPM2_GetRandom, TPM2_GetCapability.
 | NV storage | 0x0C0DE000 | 128K | Secure |
 | NSC stubs | 0x0C0FE000 | 8K | Non-Secure Callable |
 | NS app | 0x08100000 | 1024K | Non-Secure |
-| Secure RAM | 0x30000000 | 320K | Secure |
+| Secure RAM | 0x30000000 | 320K | Secure (BSS + heap + stack) |
 | NS RAM | 0x20050000 | 320K | Non-Secure |
 
 ## NSC API (TrustZone, for non-secure applications)

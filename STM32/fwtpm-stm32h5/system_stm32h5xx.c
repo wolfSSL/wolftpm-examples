@@ -110,6 +110,7 @@
   */
 
 #include "stm32h5xx.h"
+#include <math.h>  /* float_t */
 
 /**
   * @}
