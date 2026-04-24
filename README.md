@@ -20,6 +20,14 @@ Build steps:
 * `make program`
 * See [wolfTPM Firmware Example](https://github.com/wolfSSL/wolfTPM/tree/master/examples/firmware) for next steps
 
+## STM32H5 Firmware TPM (fwTPM) Port
+
+See [STM32/fwtpm-stm32h5](STM32/fwtpm-stm32h5).
+
+Firmware TPM 2.0 implementation for NUCLEO-H563ZI (Cortex-M33). Supports TrustZone secure and non-TrustZone configurations. Uses UART for mssim protocol transport.
+
+Added in https://github.com/wolfSSL/wolftpm-examples/pull/1
+
 ## Xilinx UltraScale+ MPSoC with FreeRTOS, LWIP with wolfSSL/wolfTPM
 
 See: https://github.com/dgarske/UltraZed-EG-wolf
