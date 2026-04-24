@@ -34,7 +34,10 @@ static int StmFlashRead(void* ctx, word32 offset, byte* buf, word32 size)
     word32 i;
     (void)ctx;
 
-    if (offset + size > FWTPM_NV_FLASH_SIZE) {
+    /* Overflow-safe bounds check: reject oversized size first, then the
+     * offset, without forming offset+size which can wrap for large inputs. */
+    if (size > FWTPM_NV_FLASH_SIZE ||
+        offset > FWTPM_NV_FLASH_SIZE - size) {
         return TPM_RC_FAILURE;
     }
 
@@ -65,7 +68,9 @@ static int StmFlashWrite(void* ctx, word32 offset, const byte* buf,
         return TPM_RC_FAILURE;
     }
 
-    if (offset + size > FWTPM_NV_FLASH_SIZE) {
+    /* Overflow-safe bounds check (see StmFlashRead). */
+    if (size > FWTPM_NV_FLASH_SIZE ||
+        offset > FWTPM_NV_FLASH_SIZE - size) {
         return TPM_RC_FAILURE;
     }
 
@@ -111,7 +116,8 @@ static int StmFlashWrite(void* ctx, word32 offset, const byte* buf,
     return (status == HAL_OK) ? TPM_RC_SUCCESS : TPM_RC_FAILURE;
 }
 
-/* Erase flash sectors covering the NV region */
+/* Erase flash sectors covering the requested [offset, offset+size) range.
+ * Both offset and size must be whole multiples of the sector size. */
 static int StmFlashErase(void* ctx, word32 offset, word32 size)
 {
     HAL_StatusTypeDef status;
@@ -122,8 +128,19 @@ static int StmFlashErase(void* ctx, word32 offset, word32 size)
     uint32_t startSector;
     uint32_t numSectors;
     (void)ctx;
-    (void)offset;
-    (void)size;
+
+    /* Require sector-aligned offset and size (callers asking for a
+     * partial-sector erase would otherwise quietly wipe adjacent data). */
+    if ((offset % FWTPM_NV_FLASH_SECTOR_SIZE) != 0 ||
+        (size % FWTPM_NV_FLASH_SECTOR_SIZE) != 0 || size == 0) {
+        return TPM_RC_FAILURE;
+    }
+
+    /* Overflow-safe bounds check (see StmFlashRead). */
+    if (size > FWTPM_NV_FLASH_SIZE ||
+        offset > FWTPM_NV_FLASH_SIZE - size) {
+        return TPM_RC_FAILURE;
+    }
 
     /* Calculate physical flash address (remove TZ secure alias if present).
      * STM32H563: Bank 1 = 0x08000000-0x080FFFFF,
@@ -133,7 +150,8 @@ static int StmFlashErase(void* ctx, word32 offset, word32 size)
 #else
     physAddr = FWTPM_NV_FLASH_BASE;
 #endif
-    numSectors = FWTPM_NV_FLASH_SIZE / FWTPM_NV_FLASH_SECTOR_SIZE;
+    physAddr += offset;
+    numSectors = size / FWTPM_NV_FLASH_SECTOR_SIZE;
 
     HAL_ICACHE_Disable();
 

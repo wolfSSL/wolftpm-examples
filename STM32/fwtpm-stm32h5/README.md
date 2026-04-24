@@ -12,9 +12,10 @@ Supports TrustZone (CMSE) for hardware-isolated TPM secrets.
 ## Prerequisites
 
 - `arm-none-eabi-gcc` toolchain (12.x or later)
-- STM32Cube_FW_H5 SDK v1.5.1+
+- STM32Cube_FW_H5 SDK v1.5.0+ (v1.6.0 verified)
 - wolfSSL source tree (default: `/tmp/wolfssl-fwtpm`)
-- OpenOCD (STMicroelectronics fork for stm32h5x flash driver)
+- OpenOCD (STMicroelectronics fork for stm32h5x flash driver).
+  Building the fork from source requires `libusb-1.0-0-dev`.
 
 ## Build
 
@@ -27,10 +28,14 @@ make
 # With semihosting debug output (printf via SWD, UART free for TPM protocol)
 make SEMIHOSTING=1
 
-# TrustZone enabled (requires TZEN option byte set)
-# Flip the option byte once with:
+# TrustZone enabled (requires TZEN option byte set).
+# Flip the option byte once with STM32CubeProgrammer:
 #   STM32_Programmer_CLI -c port=swd mode=hotplug -ob TZEN=0xB4
-# Then power-cycle. Use TZEN=0xC3 to revert to non-TrustZone.
+# Or with STM-OpenOCD (stm32h5x trustzone/option_load are TODO stubs,
+# but option_write works on FLASH_OPTR at offset 0x074):
+#   stm32h5x option_write 0 0x074 0xB4000000 0xFF000000   # enable TZEN
+#   stm32h5x option_write 0 0x074 0xC3000000 0xFF000000   # revert
+# Follow either command with a board power-cycle (or OpenOCD reset).
 make TZEN=1
 
 # Override wolfSSL path
@@ -75,7 +80,7 @@ On boot (without semihosting), UART shows:
 ```
 === wolfTPM fwTPM Server (STM32H5 Secure) ===
 fwTPM v0.1.0 initialized OK
-  FWTPM_CTX size: 159872 bytes
+  FWTPM_CTX size: 95952 bytes
   NV flash: 0x081E0000 (128 KB)
 Waiting for UART commands...
 ```

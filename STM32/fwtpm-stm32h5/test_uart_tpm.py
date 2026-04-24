@@ -39,6 +39,12 @@ TPM_CAP_TPM_PROPERTIES = 0x00000006
 TPM_PT_MANUFACTURER = 0x00000105
 TPM_PT_FIRMWARE_VERSION_1 = 0x00000111
 
+# Microsoft simulator (mssim) protocol codes — match main.c
+MSSIM_SIGNAL_POWER_ON   = 1
+MSSIM_SIGNAL_POWER_OFF  = 2
+MSSIM_SEND_COMMAND      = 8
+MSSIM_SIGNAL_RESET      = 17
+
 
 def build_tpm_cmd(cc, payload=b""):
     """Build a TPM 2.0 command with no sessions."""
@@ -192,6 +198,101 @@ def test_get_capability(ser):
     return True
 
 
+def test_swtpm_bogus_size(ser):
+    """Send a swtpm frame with an illegal cmdSize (< 10) and verify the
+    device emits the hardcoded 10-byte TPM_RC_FAILURE response without
+    hanging, then that the loop recovers and accepts a normal command."""
+    print("\n[5] swtpm negative test (cmdSize < 10)")
+    # tag=0x8001, size=0x00000005, cc=0x00000144 (TPM2_Startup)
+    bogus = struct.pack(">HII", 0x8001, 0x00000005, 0x00000144)
+    ser.write(bogus)
+    ser.flush()
+
+    rsp = _read_exact(ser, 10)
+    if len(rsp) < 10:
+        print(f"  FAIL: timed out waiting for error response "
+              f"(got {len(rsp)} bytes)")
+        return False
+    tag, size, rc = struct.unpack(">HII", rsp)
+    # Expect exactly: tag=0x8001, size=10, rc=TPM_RC_FAILURE(0x101)
+    if tag == 0x8001 and size == 10 and rc == 0x101:
+        print(f"  OK: got TPM_RC_FAILURE on bogus size")
+    else:
+        print(f"  FAIL: tag=0x{tag:04X} size={size} rc=0x{rc:08X}")
+        return False
+
+    # Verify loop recovers: a normal GetRandom must still work.
+    rsp = send_tpm_cmd(ser,
+        build_tpm_cmd(TPM_CC_GET_RANDOM, struct.pack(">H", 8)))
+    if rsp is None:
+        print("  FAIL: loop did not recover after error")
+        return False
+    _, _, rc = parse_tpm_rsp(rsp)
+    if rc != 0:
+        print(f"  FAIL: GetRandom after error rc=0x{rc:08X}")
+        return False
+    print("  Loop recovered OK")
+    return True
+
+
+def _mssim_signal(ser, sig):
+    """Send a 4-byte mssim signal and read the 4-byte ack."""
+    ser.write(struct.pack(">I", sig))
+    ser.flush()
+    ack = _read_exact(ser, 4)
+    if len(ack) < 4:
+        return False
+    return struct.unpack(">I", ack)[0] == 0
+
+
+def test_mssim_framing(ser):
+    """Exercise the Microsoft TPM simulator framing compatible with the
+    wolfTPM swtpm client: POWER_ON ack, SEND_COMMAND + GetRandom, POWER_OFF."""
+    print("\n[6] mssim framing (POWER_ON, SEND_COMMAND, POWER_OFF)")
+    if not _mssim_signal(ser, MSSIM_SIGNAL_POWER_ON):
+        print("  FAIL: POWER_ON not acked")
+        return False
+
+    # SEND_COMMAND: U32BE cmd(=8) + U8 locality + U32BE cmdSize + cmdPayload
+    tpm_cmd = build_tpm_cmd(TPM_CC_GET_RANDOM, struct.pack(">H", 16))
+    packet = (struct.pack(">I", MSSIM_SEND_COMMAND)
+        + struct.pack(">B", 0)
+        + struct.pack(">I", len(tpm_cmd))
+        + tpm_cmd)
+    ser.write(packet)
+    ser.flush()
+
+    # Response: U32BE rspSize + rspPayload + U32BE ack
+    rsp_sz_bytes = _read_exact(ser, 4)
+    if len(rsp_sz_bytes) < 4:
+        print("  FAIL: short mssim response size header")
+        return False
+    rsp_sz = struct.unpack(">I", rsp_sz_bytes)[0]
+    if rsp_sz < 10 or rsp_sz > MAX_TPM_RSP_SIZE:
+        print(f"  FAIL: bad mssim rspSize={rsp_sz}")
+        return False
+    rsp = _read_exact(ser, rsp_sz)
+    ack = _read_exact(ser, 4)
+    if len(rsp) < rsp_sz or len(ack) < 4:
+        print("  FAIL: short mssim response/ack")
+        return False
+    if struct.unpack(">I", ack)[0] != 0:
+        print("  FAIL: non-zero mssim ack")
+        return False
+
+    _, _, rc = parse_tpm_rsp(rsp)
+    if rc != 0:
+        print(f"  FAIL: inner TPM rc=0x{rc:08X}")
+        return False
+    rand_size = struct.unpack(">H", rsp[10:12])[0]
+    print(f"  OK: mssim-framed GetRandom returned {rand_size} bytes")
+
+    if not _mssim_signal(ser, MSSIM_SIGNAL_POWER_OFF):
+        print("  FAIL: POWER_OFF not acked")
+        return False
+    return True
+
+
 def main():
     port = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_PORT
 
@@ -214,7 +315,8 @@ def main():
     failed = 0
 
     for test_fn in [test_startup, test_self_test, test_get_random,
-                    test_get_capability]:
+                    test_get_capability, test_swtpm_bogus_size,
+                    test_mssim_framing]:
         try:
             if test_fn(ser):
                 passed += 1

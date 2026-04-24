@@ -46,8 +46,10 @@ static void Error_Handler(void);
 UART_HandleTypeDef huart3;
 RNG_HandleTypeDef hrng;
 
-/* Global fwTPM context pointer (used by fwtpm_nsc.c) */
-volatile FWTPM_CTX* g_fwtpmCtx = NULL;
+/* Global fwTPM context pointer (used by fwtpm_nsc.c). Written once at
+ * init before the non-secure world is released and never modified after,
+ * so no volatile is required. */
+FWTPM_CTX* g_fwtpmCtx = NULL;
 
 /* Static fwTPM context (avoids heap fragmentation on constrained targets) */
 static FWTPM_CTX g_ctx;
@@ -317,6 +319,7 @@ static void FwTPM_UartCommandLoop(FWTPM_CTX* ctx)
     uint32_t cmdSize;
     uint32_t remaining;
     int rspSize;
+    uint32_t rspSzOut;
     uint8_t rspHdr[4];
 
     while (1) {
@@ -433,11 +436,14 @@ static void FwTPM_UartCommandLoop(FWTPM_CTX* ctx)
         FWTPM_ProcessCommand(ctx, ctx->cmdBuf, (int)cmdSize,
             ctx->rspBuf, &rspSize, (int)locality);
 
-        /* Send mssim response: size(4) + payload + ack(4) */
-        StoreU32BE(rspHdr, (uint32_t)rspSize);
+        /* Send mssim response: size(4) + payload + ack(4).
+         * Clamp a negative rspSize to zero so the client doesn't block
+         * waiting for a bogus 0xFFFFFFFF-byte payload on an error. */
+        rspSzOut = (rspSize > 0) ? (uint32_t)rspSize : 0;
+        StoreU32BE(rspHdr, rspSzOut);
         UartSend(rspHdr, 4);
-        if (rspSize > 0) {
-            UartSend(ctx->rspBuf, (uint32_t)rspSize);
+        if (rspSzOut != 0) {
+            UartSend(ctx->rspBuf, rspSzOut);
         }
         UartSendAck();
     }

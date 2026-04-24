@@ -24,35 +24,53 @@
 #include "fwtpm_nsc.h"
 #include <string.h>
 
-/* Global secure fwTPM context pointer (set by main.c) */
-extern volatile FWTPM_CTX* g_fwtpmCtx;
+/* Global secure fwTPM context pointer (set once by main.c at init,
+ * before the non-secure world is released; never modified after). */
+extern FWTPM_CTX* g_fwtpmCtx;
 
 FWTPM_NSC_ENTRY
 int FWTPM_NSC_ExecuteCommand(const uint8_t* cmdBuf, uint32_t cmdSz,
                               uint8_t* rspBuf, uint32_t* rspSz)
 {
-    FWTPM_CTX* ctx = (FWTPM_CTX*)g_fwtpmCtx;
+    FWTPM_CTX* ctx = g_fwtpmCtx;
+    uint32_t localRspSz;
+    int rspSzInt;
     int rc;
 
     if (ctx == NULL || cmdBuf == NULL || rspBuf == NULL || rspSz == NULL) {
         return -1;
     }
-    if (cmdSz > FWTPM_MAX_COMMAND_SIZE || *rspSz == 0) {
+
+#if defined(__ARM_FEATURE_CMSE) && (__ARM_FEATURE_CMSE == 3U)
+    /* Validate the rspSz pointer itself BEFORE any dereference.
+     * A malicious non-secure caller could otherwise pass a pointer into
+     * secure memory or device-register space and leak state through
+     * timing/error-code side channels. */
+    if (cmse_check_address_range(rspSz, sizeof(*rspSz),
+            CMSE_NONSECURE | CMSE_MPU_READWRITE) == NULL) {
+        return -3;
+    }
+#endif
+
+    /* Snapshot *rspSz into a local — rspSz points at non-secure memory
+     * which can be mutated concurrently (TrustZone double-fetch). Only
+     * use localRspSz past this point; write *rspSz exactly once on exit. */
+    localRspSz = *rspSz;
+
+    if (cmdSz > FWTPM_MAX_COMMAND_SIZE || localRspSz == 0) {
+        *rspSz = 0;
         return -2;
     }
 
 #if defined(__ARM_FEATURE_CMSE) && (__ARM_FEATURE_CMSE == 3U)
-    /* Validate that pointers are in non-secure memory */
     if (cmse_check_address_range((void*)cmdBuf, cmdSz,
             CMSE_NONSECURE | CMSE_MPU_READ) == NULL) {
+        *rspSz = 0;
         return -3;
     }
-    if (cmse_check_address_range(rspBuf, *rspSz,
+    if (cmse_check_address_range(rspBuf, localRspSz,
             CMSE_NONSECURE | CMSE_MPU_READWRITE) == NULL) {
-        return -3;
-    }
-    if (cmse_check_address_range(rspSz, sizeof(*rspSz),
-            CMSE_NONSECURE | CMSE_MPU_READWRITE) == NULL) {
+        *rspSz = 0;
         return -3;
     }
 #endif
@@ -61,22 +79,30 @@ int FWTPM_NSC_ExecuteCommand(const uint8_t* cmdBuf, uint32_t cmdSz,
     memcpy(ctx->cmdBuf, cmdBuf, cmdSz);
 
     /* Process the TPM command */
-    {
-        int rspSzInt = FWTPM_MAX_COMMAND_SIZE;
-        rc = FWTPM_ProcessCommand(ctx, ctx->cmdBuf, (int)cmdSz,
-            ctx->rspBuf, &rspSzInt, 0);
+    rspSzInt = FWTPM_MAX_COMMAND_SIZE;
+    rc = FWTPM_ProcessCommand(ctx, ctx->cmdBuf, (int)cmdSz,
+        ctx->rspBuf, &rspSzInt, 0);
 
-        if (rc == 0 && rspSzInt > 0) {
-            if ((uint32_t)rspSzInt <= *rspSz) {
-                memcpy(rspBuf, ctx->rspBuf, rspSzInt);
-                *rspSz = (uint32_t)rspSzInt;
-                return 0;
-            }
-            return -4; /* response too large */
-        }
+    if (rc != 0) {
+        *rspSz = 0;
+        return rc;
     }
 
-    return rc; /* error */
+    /* rc == 0 but no response — treat as error rather than silently
+     * leaving *rspSz at its input value. */
+    if (rspSzInt <= 0) {
+        *rspSz = 0;
+        return -5;
+    }
+
+    if ((uint32_t)rspSzInt > localRspSz) {
+        *rspSz = 0;
+        return -4; /* response too large for caller buffer */
+    }
+
+    memcpy(rspBuf, ctx->rspBuf, (size_t)rspSzInt);
+    *rspSz = (uint32_t)rspSzInt;
+    return 0;
 }
 
 FWTPM_NSC_ENTRY
