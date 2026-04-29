@@ -1,0 +1,28 @@
+/* mpfs-fwtpm-disable-cpu4.dts
+ *
+ * Device tree overlay to disable cpu4 (U54 hart 4) for AMP fwTPM.
+ * Hart 4 runs fwTPM in bare-metal M-mode; Linux must not schedule on it.
+ *
+ * Note: the fwTPM TIS mailbox + console ring lives in L2 LIM at
+ * 0x08000000 (16KB). LIM is not part of Linux's main DRAM map and
+ * does not need a reserved-memory entry on this platform.
+ *
+ * Compile: dtc -@ -I dts -O dtb -o mpfs-fwtpm-disable-cpu4.dtbo \
+ *              mpfs-fwtpm-disable-cpu4.dts
+ *
+ * Deploy: copy .dtbo to the boot partition overlays/ directory.
+ */
+
+/dts-v1/;
+/plugin/;
+
+/ {
+	compatible = "microchip,mpfs";
+
+	fragment@0 {
+		target = <&cpu4>;
+		__overlay__ {
+			status = "disabled";
+		};
+	};
+};

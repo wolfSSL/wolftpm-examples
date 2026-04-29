@@ -1,0 +1,11 @@
+build/
+*.o
+*.elf
+*.map
+*.dtbo
+payload.bin
+u-boot.bin
+
+# Python client bytecode
+__pycache__/
+*.pyc

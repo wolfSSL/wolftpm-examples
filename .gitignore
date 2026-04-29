@@ -70,3 +70,7 @@ Xilinx/fwtpm-zcu102-r5/petalinux/project-spec/meta-user/recipes-bsp/fwtpm-r5/fil
 
 # Built linux-client (cross-compiled aarch64, no extension)
 Xilinx/fwtpm-zcu102-r5/linux-client/fwtpm_rpmsg_test
+
+# Microchip PolarFire build artifacts
+Microchip/fwtpm-polarfire-miv/firmware/*/build/
+Microchip/fwtpm-polarfire-miv/fpga/
