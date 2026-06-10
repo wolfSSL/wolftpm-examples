@@ -1,0 +1,25 @@
+This meta-user layer carries the ZCU102 fwTPM customizations for this
+PetaLinux project. It is not a general-purpose Yocto layer.
+
+Contents
+========
+
+- recipes-bsp/device-tree/files/system-user.dtsi
+    Lock-step RPU + OpenAMP device tree: 1 MiB rproc_0_reserved carveout,
+    vring/buffer regions and the ZynqMP IPI mailbox, QSPI disabled for
+    Linux (owned by the R5 fwTPM), and ttc3 disabled so the R5 timer use
+    does not collide with Linux timekeeping.
+
+- recipes-bsp/fwtpm-r5/
+    Stages the prebuilt Cortex-R5 firmware ELF (fwtpm_r5.elf) into
+    /lib/firmware so Linux remoteproc can load it. The ELF is built under
+    firmware/fwtpm-r5/ and staged with "make stage" (see the top-level
+    petalinux/README.md).
+
+- recipes-apps/fwtpm-rpmsg-test/
+    Builds the /usr/bin/fwtpm_rpmsg_test OpenAMP RPMsg smoke-test client.
+
+- recipes-kernel/linux/ (openamp.cfg)
+    Enables remoteproc + RPMsg char + ZynqMP IPI mailbox kernel options.
+
+See ../../README.md and ../../../README.md for build and usage details.

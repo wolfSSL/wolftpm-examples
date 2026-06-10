@@ -53,3 +53,20 @@ Mkfile.old
 dkms.conf
 
 Infineon/PSoC6_WiFi_HTTPS_Server/build
+
+# Vitis-generated BSP staged (or symlinked) inside the firmware tree
+Xilinx/fwtpm-zcu102-r5/firmware/fwtpm-r5/bsp/
+
+# Stock ZCU102 .xsa staged for petalinux-config (reproducible from
+# /opt/Xilinx/2025.2/data/embeddedsw/lib/fixed_hwplatforms/zcu102.xsa)
+Xilinx/fwtpm-zcu102-r5/hw/
+
+# PetaLinux build outputs and imported hardware description
+Xilinx/fwtpm-zcu102-r5/petalinux/components/
+Xilinx/fwtpm-zcu102-r5/petalinux/project-spec/hw-description/
+
+# Built R5 ELF copied into the firmware-staging recipe
+Xilinx/fwtpm-zcu102-r5/petalinux/project-spec/meta-user/recipes-bsp/fwtpm-r5/files/fwtpm_r5.elf
+
+# Built linux-client (cross-compiled aarch64, no extension)
+Xilinx/fwtpm-zcu102-r5/linux-client/fwtpm_rpmsg_test

@@ -1,0 +1,203 @@
+/*
+ * system-user.dtsi -- ZCU102 fwTPM-on-R5 lock-step overlay.
+ *
+ * Reserves a 1 MiB DDR carveout for the R5 firmware (matches what
+ * the firmware Makefile / lscript.ld link to), plus adjacent vrings
+ * and a 256 KiB rpmsg buffer pool. Forces the RPU cluster to lock-
+ * step mode (xlnx,cluster-mode = <1>, xlnx,tcm-mode = <1>) so a
+ * single remoteproc0 instance manages both R5 cores as one logical
+ * safety processor.
+ *
+ * QSPI: declares a 64 KiB partition labelled "fwtpm-nv" at the last
+ * 64 KiB of the dual-stacked MT25QU512 (offset 0x07FF0000 in the
+ * 128 MiB total). Linux must NOT mount or write this partition; it
+ * is owned by the R5 fwTPM for persistent NV storage.
+ *
+ * Bindings: matches Documentation/devicetree/bindings/remoteproc/
+ * xlnx,zynqmp-r5fss.yaml in linux-xlnx 6.12.x. The driver
+ * (drivers/remoteproc/xlnx_r5_remoteproc.c) binds to
+ * "xlnx,zynqmp-r5fss" / "xlnx,zynqmp-r5f". The "xlnx,zynqmp-r5-
+ * remoteproc" / "xilinx,r5f" pair from older Xilinx vendor trees
+ * does NOT bind to the upstream driver shipped here.
+ *
+ * IPI mailbox: a zynqmp_ipi1 controller is declared below with one
+ * RPU0 child mailbox (xlnx,ipi-id = 1) bound to the bare-metal-app
+ * channel (xlnx,ipi-id = 7 on the controller side). The r5f@0 node
+ * references it via mboxes / mbox-names so kick() actually fires the
+ * IPI when Linux notifies the R5 (and vice-versa). Reg-base layout
+ * mirrors the OpenAMP V6 reference DT:
+ *   /opt/Xilinx/2025.2/data/openamp-system-reference/examples/linux/
+ *     dts/xilinx/xilinx-openamp-for-v6.x.dtso
+ *
+ * Copyright (C) 2006-2026 wolfSSL Inc.
+ */
+
+/include/ "system-conf.dtsi"
+
+#define PD_RPU_0        7
+#define PD_R5_0_ATCM    15
+#define PD_R5_0_BTCM    16
+#define PD_R5_1_ATCM    17
+#define PD_R5_1_BTCM    18
+
+/ {
+    reserved-memory {
+        #address-cells = <2>;
+        #size-cells = <2>;
+        ranges;
+
+        /* R5_0 firmware load region (matches firmware lscript.ld). */
+        rproc_0_reserved: rproc@3ed00000 {
+            no-map;
+            reg = <0x0 0x3ED00000 0x0 0x100000>;   /* 1 MiB */
+        };
+
+        /* OpenAMP shared regions sit OUTSIDE rproc_0_reserved at
+         * 0x3EE00000+, so Linux's vring writes never land in R5
+         * firmware text/bss. Names MUST match what the Linux
+         * remoteproc core looks for via rproc_find_carveout_by_name:
+         *   "vdev%dvring%d" -> "vdev0vring0", "vdev0vring1"
+         *   "vdev%dbuffer"  -> "vdev0buffer"
+         * If named "vring0"/"buffer" Linux can't find them and
+         * allocates fresh DMA memory at a random address (R5 and
+         * Linux then talk to two different physical regions and
+         * rpmsg_send_ns_message blocks waiting for buffers).
+         * Keep these in sync with the macros in
+         * firmware/fwtpm-r5/include/xparameters.h. */
+        rpu0vring0: vdev0vring0@3ee00000 {
+            no-map;
+            reg = <0x0 0x3EE00000 0x0 0x4000>;     /* 16 KiB */
+        };
+        rpu0vring1: vdev0vring1@3ee04000 {
+            no-map;
+            reg = <0x0 0x3EE04000 0x0 0x4000>;     /* 16 KiB */
+        };
+        rpu0buffer: vdev0buffer@3ee08000 {
+            no-map;
+            compatible = "shared-dma-pool";
+            reg = <0x0 0x3EE08000 0x0 0x40000>;    /* 256 KiB */
+        };
+    };
+
+    /*
+     * R5 cluster in lock-step. xlnx,cluster-mode = 1 + xlnx,tcm-mode = 1
+     * combines all four 64 KiB TCM banks into one 256 KiB region visible
+     * to a single R5 core.
+     */
+    remoteproc@ffe00000 {
+        compatible = "xlnx,zynqmp-r5fss";
+        xlnx,cluster-mode = <1>;
+        xlnx,tcm-mode = <1>;
+
+        #address-cells = <2>;
+        #size-cells = <2>;
+        /* Lockstep TCM mapping: A0/B0/A1/B1 contiguous from device addr 0. */
+        ranges = <0x0 0x0     0x0 0xFFE00000 0x0 0x10000>,
+                 <0x0 0x10000 0x0 0xFFE10000 0x0 0x10000>,
+                 <0x0 0x20000 0x0 0xFFE20000 0x0 0x10000>,
+                 <0x0 0x30000 0x0 0xFFE30000 0x0 0x10000>;
+
+        r5f@0 {
+            compatible = "xlnx,zynqmp-r5f";
+            reg = <0x0 0x0     0x0 0x10000>,
+                  <0x0 0x10000 0x0 0x10000>,
+                  <0x0 0x20000 0x0 0x10000>,
+                  <0x0 0x30000 0x0 0x10000>;
+            reg-names = "atcm0", "atcm1", "btcm0", "btcm1";
+            power-domains = <&zynqmp_firmware PD_RPU_0>,
+                             <&zynqmp_firmware PD_R5_0_ATCM>,
+                             <&zynqmp_firmware PD_R5_0_BTCM>,
+                             <&zynqmp_firmware PD_R5_1_ATCM>,
+                             <&zynqmp_firmware PD_R5_1_BTCM>;
+            /* Order matters: kernel's rproc_add_virtio_dev calls
+             * of_reserved_mem_device_init_by_idx using the index of
+             * the vdev0buffer carveout. Layout matches the OpenAMP V6
+             * reference DT: fw image, vring0, vring1, buffer. */
+            memory-region = <&rproc_0_reserved>,
+                             <&rpu0vring0>,
+                             <&rpu0vring1>,
+                             <&rpu0buffer>;
+            mboxes = <&ipi_mailbox_rpu0 0>, <&ipi_mailbox_rpu0 1>;
+            mbox-names = "tx", "rx";
+        };
+    };
+
+    /*
+     * IPI mailbox controller for APU <-> RPU0 (OpenAMP-style).
+     * The host (APU) uses xlnx,ipi-id = 7 (bare-metal-app channel);
+     * the destination (RPU0) is xlnx,ipi-id = 1. Registers are split
+     * across local/remote request/response 32-byte windows in the
+     * IPI buffer block at 0xFF990000.
+     */
+    zynqmp_ipi1: zynqmp_ipi1 {
+        compatible = "xlnx,zynqmp-ipi-mailbox";
+        interrupt-parent = <&gic>;
+        interrupts = <0 29 4>;          /* GIC SPI 29, level-high */
+        xlnx,ipi-id = <7>;              /* host: bare-metal-app channel */
+        #address-cells = <1>;
+        #size-cells = <1>;
+        ranges;
+
+        ipi_mailbox_rpu0: mailbox@ff990600 {
+            reg = <0xff990600 0x20>,
+                  <0xff990620 0x20>,
+                  <0xff9900c0 0x20>,
+                  <0xff9900e0 0x20>;
+            reg-names = "local_request_region",
+                        "local_response_region",
+                        "remote_request_region",
+                        "remote_response_region";
+            #mbox-cells = <1>;
+            xlnx,ipi-id = <1>;          /* dest: RPU0 channel */
+        };
+    };
+};
+
+/*
+ * ZCU102 gem3 PHY: TI DP83867IS at MDIO addr 0xC. The XSA-derived
+ * pcw.dtsi enables gem3 but does not describe the PHY -- without
+ * an explicit phy node the kernel falls back to "Generic PHY" and
+ * the link never trains on a fresh boot (NO-CARRIER, autoneg fails).
+ * Adding the standard ZCU102 mdio/phy subnode binds the TI driver
+ * which programs the rgmii clock-skew registers needed for link.
+ */
+&gem3 {
+    #address-cells = <1>;
+    #size-cells = <0>;
+    phy-handle = <&phy0>;
+    phy0: phy@c {
+        reg = <0xc>;
+        ti,rx-internal-delay = <0x8>;
+        ti,tx-internal-delay = <0xa>;
+        ti,fifo-depth = <0x1>;
+        ti,dp83867-rxctrl-strap-quirk;
+    };
+};
+
+/*
+ * QSPI is owned exclusively by the R5 fwTPM firmware for persistent
+ * NV storage. Disabling the Linux controller node prevents
+ * spi-zynqmp-qspi from binding and putting the controller into a
+ * state that races with XQspiPsu polled transfers from the RPU.
+ * In practice Linux did not use this flash anyway (the stock board
+ * boots from SD, and the prior bind already failed at flash@0).
+ *
+ * If a future workload needs Linux access to part of the flash,
+ * re-enable here and split the partition table with explicit
+ * "read-only" + DMA-coherent gating around the fwtpm-nv range.
+ */
+&qspi {
+    status = "disabled";
+};
+
+/*
+ * TTC3 (0xFF140000) is owned exclusively by the R5 fwTPM clock HAL
+ * (fwtpm_clock_zynqmp.c), which stops, reconfigures, resets and starts
+ * the counter directly. Disable the Linux node so the kernel timer
+ * framework does not also claim and program the same TTC instance.
+ * Node label per the ZynqMP base DTS (ttc0..ttc3 at 0xFF110000,
+ * 0xFF120000, 0xFF130000, 0xFF140000); 0xFF140000 is ttc3.
+ */
+&ttc3 {
+    status = "disabled";
+};
