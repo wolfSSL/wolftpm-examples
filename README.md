@@ -28,6 +28,14 @@ Firmware TPM 2.0 implementation for NUCLEO-H563ZI (Cortex-M33). Supports TrustZo
 
 Added in https://github.com/wolfSSL/wolftpm-examples/pull/1
 
+## Xilinx ZCU102 fwTPM on Cortex-R5 Lock-Step
+
+See [Xilinx/fwtpm-zcu102-r5](Xilinx/fwtpm-zcu102-r5).
+
+Firmware TPM 2.0 running bare-metal on the Zynq UltraScale+ MPSoC R5 RPU
+in lock-step mode. PetaLinux on the A53 APU acts as TPM client over
+OpenAMP RPMsg via Linux remoteproc. Persistent NV in QSPI flash.
+
 ## Xilinx UltraScale+ MPSoC with FreeRTOS, LWIP with wolfSSL/wolfTPM
 
 See: https://github.com/dgarske/UltraZed-EG-wolf
