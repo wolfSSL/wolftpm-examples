@@ -1,7 +1,11 @@
 /* fwtpm_nv_flash.c
  *
- * Generic STM32 internal flash NV HAL for fwTPM.
- * Uses STM32 HAL FLASH API - works across STM32 families (H5, L5, U5, etc.)
+ * STM32 internal flash NV HAL for the fwTPM append-only journal.
+ *
+ * With WOLFTPM_FWTPM_NV_APPEND_ONLY the fwTPM core buffers writes into program
+ * granules and only ever calls write() with writeAlign-aligned, forward, into
+ * erased bytes, so this HAL is a plain flash driver: read raw bytes, program
+ * 16-byte quadwords, erase whole sectors. No read-modify-write in the port.
  *
  * Copyright (C) 2006-2025 wolfSSL Inc.
  *
@@ -27,7 +31,17 @@
     #define FWTPM_NV_FLASH_PROGRAM_SIZE 16  /* quadword for H5 */
 #endif
 
-/* STM32H5 internal flash is memory-mapped and directly readable */
+/* Physical flash base of the NV region. Under TrustZone the NV region is read
+ * through the secure alias (0x0C......); the flash controller erase/program
+ * operations use the non-aliased physical address. */
+#if TZEN_ENABLED
+    #define FWTPM_NV_FLASH_PHYS_BASE \
+        (FWTPM_NV_FLASH_BASE - 0x0C000000 + 0x08000000)
+#else
+    #define FWTPM_NV_FLASH_PHYS_BASE  FWTPM_NV_FLASH_BASE
+#endif
+
+/* STM32H5 internal flash is memory-mapped and directly readable. */
 static int StmFlashRead(void* ctx, word32 offset, byte* buf, word32 size)
 {
     volatile const byte* src;
@@ -48,35 +62,33 @@ static int StmFlashRead(void* ctx, word32 offset, byte* buf, word32 size)
     return TPM_RC_SUCCESS;
 }
 
-/* Write to flash in FWTPM_NV_FLASH_PROGRAM_SIZE aligned chunks.
- * STM32H5 requires 128-bit (16-byte) aligned quadword writes. */
+/* Program flash. The append-only core guarantees offset and size are
+ * FWTPM_NV_FLASH_PROGRAM_SIZE aligned and target erased cells, so this is a
+ * plain quadword program. STM32H5 needs a 16-byte aligned source. Unaligned
+ * offset or size is rejected: the loop programs whole quadwords, so an
+ * unaligned size would program past (offset+size) into the next granule. */
 static int StmFlashWrite(void* ctx, word32 offset, const byte* buf,
     word32 size)
 {
-    HAL_StatusTypeDef status;
-    uint32_t addr;
+    HAL_StatusTypeDef status = HAL_OK;
     word32 written = 0;
-    /* STM32H5 quadword programming requires the source pointer to be
-     * 16-byte aligned. Default GCC stack alignment for byte[] is 8. */
     byte alignBuf[FWTPM_NV_FLASH_PROGRAM_SIZE]
         __attribute__((aligned(FWTPM_NV_FLASH_PROGRAM_SIZE)));
-    word32 chunkSz;
     (void)ctx;
 
-    /* Destination address must also be quadword-aligned. */
-    if ((offset % FWTPM_NV_FLASH_PROGRAM_SIZE) != 0) {
+    if ((offset % FWTPM_NV_FLASH_PROGRAM_SIZE) != 0 ||
+        (size % FWTPM_NV_FLASH_PROGRAM_SIZE) != 0) {
         return TPM_RC_FAILURE;
     }
-
-    /* Overflow-safe bounds check (see StmFlashRead). */
     if (size > FWTPM_NV_FLASH_SIZE ||
         offset > FWTPM_NV_FLASH_SIZE - size) {
         return TPM_RC_FAILURE;
     }
+    if (size == 0) {
+        return TPM_RC_SUCCESS;
+    }
 
-    /* Disable instruction cache during flash operations */
     HAL_ICACHE_Disable();
-
     status = HAL_FLASH_Unlock();
     if (status != HAL_OK) {
         HAL_ICACHE_Invalidate();
@@ -85,28 +97,16 @@ static int StmFlashWrite(void* ctx, word32 offset, const byte* buf,
     }
 
     while (written < size) {
-        addr = FWTPM_NV_FLASH_BASE + offset + written;
-        chunkSz = size - written;
-
-        if (chunkSz >= FWTPM_NV_FLASH_PROGRAM_SIZE) {
-            /* Full quadword write via aligned staging buffer */
-            memcpy(alignBuf, buf + written, FWTPM_NV_FLASH_PROGRAM_SIZE);
-            status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_QUADWORD,
-                addr, (uint32_t)(uintptr_t)alignBuf);
-            written += FWTPM_NV_FLASH_PROGRAM_SIZE;
-        }
-        else {
-            /* Partial final chunk: pad with 0xFF (erased state) */
-            memset(alignBuf, 0xFF, sizeof(alignBuf));
-            memcpy(alignBuf, buf + written, chunkSz);
-            status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_QUADWORD,
-                addr, (uint32_t)(uintptr_t)alignBuf);
-            written += chunkSz;
-        }
-
+        /* Size is granule-aligned (checked above), so every iteration
+         * programs a full quadword copied to an aligned source buffer. */
+        XMEMCPY(alignBuf, buf + written, FWTPM_NV_FLASH_PROGRAM_SIZE);
+        status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_QUADWORD,
+            (uint32_t)(FWTPM_NV_FLASH_PHYS_BASE + offset + written),
+            (uint32_t)(uintptr_t)alignBuf);
         if (status != HAL_OK) {
             break;
         }
+        written += FWTPM_NV_FLASH_PROGRAM_SIZE;
     }
 
     HAL_FLASH_Lock();
@@ -116,8 +116,8 @@ static int StmFlashWrite(void* ctx, word32 offset, const byte* buf,
     return (status == HAL_OK) ? TPM_RC_SUCCESS : TPM_RC_FAILURE;
 }
 
-/* Erase flash sectors covering the requested [offset, offset+size) range.
- * Both offset and size must be whole multiples of the sector size. */
+/* Erase the whole sectors covering [offset, offset+size). Called by the core
+ * at compaction (e.g. erase(0, maxSize)). */
 static int StmFlashErase(void* ctx, word32 offset, word32 size)
 {
     HAL_StatusTypeDef status;
@@ -125,36 +125,22 @@ static int StmFlashErase(void* ctx, word32 offset, word32 size)
     uint32_t sectorError = 0;
     uint32_t physAddr;
     uint32_t bankBase;
-    uint32_t startSector;
-    uint32_t numSectors;
     (void)ctx;
 
-    /* Require sector-aligned offset and size (callers asking for a
-     * partial-sector erase would otherwise quietly wipe adjacent data). */
+    /* Require sector-aligned offset and size (a partial-sector erase would
+     * otherwise quietly wipe adjacent data). */
     if ((offset % FWTPM_NV_FLASH_SECTOR_SIZE) != 0 ||
         (size % FWTPM_NV_FLASH_SECTOR_SIZE) != 0 || size == 0) {
         return TPM_RC_FAILURE;
     }
-
-    /* Overflow-safe bounds check (see StmFlashRead). */
     if (size > FWTPM_NV_FLASH_SIZE ||
         offset > FWTPM_NV_FLASH_SIZE - size) {
         return TPM_RC_FAILURE;
     }
 
-    /* Calculate physical flash address (remove TZ secure alias if present).
-     * STM32H563: Bank 1 = 0x08000000-0x080FFFFF,
-     *            Bank 2 = 0x08100000-0x081FFFFF */
-#if TZEN_ENABLED
-    physAddr = FWTPM_NV_FLASH_BASE - 0x0C000000 + 0x08000000;
-#else
-    physAddr = FWTPM_NV_FLASH_BASE;
-#endif
-    physAddr += offset;
-    numSectors = size / FWTPM_NV_FLASH_SECTOR_SIZE;
+    physAddr = FWTPM_NV_FLASH_PHYS_BASE + offset;
 
     HAL_ICACHE_Disable();
-
     status = HAL_FLASH_Unlock();
     if (status != HAL_OK) {
         HAL_ICACHE_Invalidate();
@@ -162,7 +148,7 @@ static int StmFlashErase(void* ctx, word32 offset, word32 size)
         return TPM_RC_FAILURE;
     }
 
-    /* Select bank and compute sector index relative to bank start */
+    /* Bank 1 = 0x08000000-0x080FFFFF, Bank 2 = 0x08100000-0x081FFFFF. */
     if (physAddr >= 0x08100000) {
         bankBase = 0x08100000;
         eraseInit.Banks = FLASH_BANK_2;
@@ -171,11 +157,9 @@ static int StmFlashErase(void* ctx, word32 offset, word32 size)
         bankBase = 0x08000000;
         eraseInit.Banks = FLASH_BANK_1;
     }
-    startSector = (physAddr - bankBase) / FWTPM_NV_FLASH_SECTOR_SIZE;
-
     eraseInit.TypeErase = FLASH_TYPEERASE_SECTORS;
-    eraseInit.Sector = startSector;
-    eraseInit.NbSectors = numSectors;
+    eraseInit.Sector = (physAddr - bankBase) / FWTPM_NV_FLASH_SECTOR_SIZE;
+    eraseInit.NbSectors = size / FWTPM_NV_FLASH_SECTOR_SIZE;
 
     status = HAL_FLASHEx_Erase(&eraseInit, &sectorError);
 
@@ -186,16 +170,23 @@ static int StmFlashErase(void* ctx, word32 offset, word32 size)
     return (status == HAL_OK) ? TPM_RC_SUCCESS : TPM_RC_FAILURE;
 }
 
-/* Initialize and populate the NV flash HAL struct */
+/* Populate the NV HAL. Append-only mode (built with
+ * WOLFTPM_FWTPM_NV_APPEND_ONLY) lets the byte-granular journal run on
+ * write-once flash: the core buffers program granules so write() stays a plain
+ * flash program. */
 int FWTPM_NV_FlashHAL_Init(FWTPM_NV_HAL* hal)
 {
     if (hal == NULL) {
         return -1;
     }
-    hal->read = StmFlashRead;
-    hal->write = StmFlashWrite;
-    hal->erase = StmFlashErase;
-    hal->ctx = NULL;
-    hal->maxSize = FWTPM_NV_FLASH_SIZE;
+
+    XMEMSET(hal, 0, sizeof(*hal));
+    hal->read       = StmFlashRead;
+    hal->write      = StmFlashWrite;
+    hal->erase      = StmFlashErase;
+    hal->ctx        = NULL;
+    hal->maxSize    = FWTPM_NV_FLASH_SIZE;
+    hal->writeAlign = FWTPM_NV_FLASH_PROGRAM_SIZE; /* 16-byte quadword */
+    hal->appendOnly = 1;
     return 0;
 }

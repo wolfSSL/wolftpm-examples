@@ -7,22 +7,28 @@ Supports TrustZone (CMSE) for hardware-isolated TPM secrets.
 
 | Board | Chip | Status | Date |
 |-------|------|--------|------|
-| NUCLEO-H563ZI | STM32H563ZI (Cortex-M33, 250MHz) | TZEN=0 and TZEN=1 verified (Startup, SelfTest, GetRandom, GetCapability) | 2026-04-23 |
+| NUCLEO-H563ZI | STM32H563ZI (Cortex-M33, 250MHz) | TZEN=0 and TZEN=1 verified: boot, Startup/SelfTest/GetRandom/GetCapability, wolfTPM `caps` over UART, append-only NV persistence across reboots | 2026-06-24 |
 
 ## Prerequisites
 
 - `arm-none-eabi-gcc` toolchain (12.x or later)
 - STM32Cube_FW_H5 SDK v1.5.0+ (v1.6.0 verified)
-- wolfSSL source tree (default: `/tmp/wolfssl-fwtpm`)
+- wolfTPM source tree, v4.1.0 or later (default: `../../../wolftpm`). The fwTPM
+  core is compiled from here; NV uses the core's append-only journal mode for
+  write-once flash, enabled by `WOLFTPM_FWTPM_NV_APPEND_ONLY` (defined in
+  `user_settings.h`). This needs the wolfTPM "append" NV support from
+  https://github.com/wolfSSL/wolfTPM/pull/540.
+- wolfSSL source tree (default: `../../../wolfssl`)
 - OpenOCD (STMicroelectronics fork for stm32h5x flash driver).
   Building the fork from source requires `libusb-1.0-0-dev`.
 
 ## Build
 
 ```bash
-cd src/fwtpm/ports/stm32
+cd STM32/fwtpm-stm32h5
 
-# Standard build (TZEN=0, no semihosting)
+# Standard build (TZEN=0, no semihosting). The Makefile defaults to
+# STM32Cube_FW_H5_V1.5.1; pass STM32CUBE=<path> if a different SDK is installed.
 make
 
 # With semihosting debug output (printf via SWD, UART free for TPM protocol)
@@ -38,12 +44,30 @@ make SEMIHOSTING=1
 # Follow either command with a board power-cycle (or OpenOCD reset).
 make TZEN=1
 
-# Override wolfSSL path
-make WOLFSSL_DIR=/path/to/wolfssl
+# Override wolfTPM / wolfSSL source paths
+make WOLFTPM_DIR=/path/to/wolftpm WOLFSSL_DIR=/path/to/wolfssl
 
 # Clean
 make clean
 ```
+
+NV storage uses the fwTPM core's **append-only** journal mode for write-once
+flash (`WOLFTPM_FWTPM_NV_APPEND_ONLY` in `user_settings.h`, wolfTPM v4.1.0+
+incl. PR #540). The core
+buffers each program granule and only issues `writeAlign`-aligned, forward,
+into-erased writes, so this example's `fwtpm_nv_flash.c` is a plain flash
+driver: `read` raw bytes, `write` (program) 16-byte quadwords, `erase` whole
+sectors -- no read-modify-write in the port. `FWTPM_NV_FlashHAL_Init()` sets
+`hal.appendOnly = 1` and `hal.writeAlign = 16` (the H5 quadword) before
+registering the HAL. The header sector is not rewritten per append and a power
+loss mid append leaves the previously committed state intact (compaction, on
+Clear / shutdown / journal-full, still erases the region). Note: the on-flash
+layout differs from earlier example builds -- erase the NV region when
+upgrading firmware; the fwTPM regenerates fresh seeds/state on the first boot
+after. The NV region's flash sectors have limited erase endurance
+(the STM32H5 datasheet rates ~10k cycles); each journal-full compaction
+erases the region, so NV-write-heavy workloads (frequent PCR extends / NV
+index writes) will wear it over time.
 
 ## Flash
 
@@ -70,6 +94,12 @@ $OPENOCD -s $OPENOCD_SCRIPTS \
     -f interface/stlink-dap.cfg -f target/stm32h5x.cfg \
     -c "init; reset run; shutdown"
 ```
+
+The Makefile `flash` target writes the raw `.bin` to `0x08000000`, so it is
+TZEN=0 only; for TZEN=1 flash the `.elf` via OpenOCD (above) so the secure
+`0x0C000000` addresses are used. When the NV layout changes (e.g. upgrading
+from an older build), mass-erase first so stale NV is not misread:
+`STM32_Programmer_CLI -c port=swd -e all`.
 
 ## UART Protocol
 
@@ -114,6 +144,11 @@ export TPM2_SWTPM_HOST=/dev/ttyACM0
 # Full example suite
 WOLFSSL_PATH=../wolfssl ./examples/run_examples.sh
 ```
+
+`TPM2_SWTPM_HOST` may be a symlinked serial path (e.g. `/dev/serial/by-id/...`
+or a udev alias) with wolfTPM v4.1.0 or later. The server's UART loop is
+byte-oriented, so if a client is interrupted mid-command the stream desyncs;
+reset the board to resync.
 
 ## Semihosting Debug
 
@@ -198,6 +233,27 @@ Secure SRAM available (66KB headroom).
 | Secure RAM | 0x30000000 | 320K | Secure (BSS + heap + stack) |
 | NS RAM | 0x20050000 | 320K | Non-Secure |
 
+### What runs where (TZEN=1)
+
+There are two ways to use the secure fwTPM, and they differ in what runs on
+the non-secure side:
+
+- **Over UART (this demo, SWTPM-style):** the entire fwTPM -- USART3 transport,
+  command loop, wolfCrypt, and NV -- runs in the **secure** world. `main()`
+  never releases the non-secure world, so **nothing runs on the non-secure
+  side**; the TPM "client" is the external host over the wire. The "NS app" /
+  "NS RAM" rows above show where a non-secure application could live, but this
+  demo loads none (and as flashed the secure watermark marks all flash secure).
+  TrustZone here isolates the TPM secrets, NV, and crypto from anything later
+  added to the normal world.
+
+- **On-chip via the NSC gateway:** a non-secure application on the same H5
+  calls into the secure fwTPM through the Non-Secure-Callable veneer (see
+  below). That non-secure app is what runs on the non-secure side. It requires
+  carving out a non-secure flash/RAM region (secure watermark + SAU) and
+  building/flashing a separate non-secure image -- a different setup than the
+  UART demo.
+
 ## NSC API (TrustZone, for non-secure applications)
 
 Include `fwtpm_nsc.h` and link against `fwtpm_nsc_lib.o`:
@@ -225,5 +281,9 @@ int rc = FWTPM_NSC_ExecuteCommand(cmd, cmdLen, rsp, &rspSz);
 2. Create linker scripts (`CHIP.ld` for non-TZ, `CHIP_S.ld`/`CHIP_NS.ld` for TZ)
 3. Copy startup assembly from SDK
 4. Add HAL MSP callbacks for your board's pin assignments
-5. Update `Makefile` with new target option
-6. Update this README
+5. For internal-flash NV, implement a plain `FWTPM_NV_HAL` (read / write /
+   erase), set `hal.appendOnly = 1` and `hal.writeAlign = <program size>`, and
+   define `WOLFTPM_FWTPM_NV_APPEND_ONLY` in `user_settings.h` -- see
+   `fwtpm_nv_flash.c`
+6. Update `Makefile` with new target option
+7. Update this README
