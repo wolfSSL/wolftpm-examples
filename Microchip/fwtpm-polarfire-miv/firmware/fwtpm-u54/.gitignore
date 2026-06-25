@@ -3,7 +3,7 @@ build/
 *.elf
 *.map
 *.dtbo
-payload.bin
+payload*.bin
 u-boot.bin
 
 # Python client bytecode

@@ -57,8 +57,15 @@ void mpfs_uart_init(uint32_t base, uint32_t baud_clk, uint32_t baud_rate)
 
 void mpfs_uart_putc(uint32_t base, char c)
 {
-    while ((MMUART_LSR(base) & MSS_UART_THRE) == 0)
-        ;
+    uint64_t start = mpfs_rdtime();
+
+    /* Bound the THRE wait (~10 ms at the 1 MHz MTIME tick) so an unrouted
+     * or stalled UART4 cannot hang the server; the console ring is the
+     * primary readback path. Drop the byte on timeout. */
+    while ((MMUART_LSR(base) & MSS_UART_THRE) == 0) {
+        if ((mpfs_rdtime() - start) > (MTIME_FREQ / 100))
+            return;
+    }
     MMUART_THR(base) = (uint8_t)c;
 }
 
@@ -99,12 +106,9 @@ void mpfs_console_putc(FWTPM_CONSOLE_RING *ring, char c)
     uint64_t wp = ring->write_pos;
     uint64_t rp = ring->read_pos;
 
-    /* Overwrite-oldest ring: this is a diagnostic console and in practice
-     * no consumer drains it (the Linux client snapshots, it never advances
-     * read_pos), so dropping the newest byte would make it a fill-once
-     * buffer that never shows recent activity. Instead, when full, drop the
-     * OLDEST byte (advance read_pos) and count it, so the most recent output
-     * is always retained. The reader reconstructs from write_pos % size. */
+    /* Overwrite-oldest: nothing drains this diagnostic ring, so when full
+     * drop the OLDEST byte (advance read_pos, count it) rather than the
+     * newest -- keeps the most recent output. */
     if ((wp - rp) >= ring->size) {
         ring->overflow_cnt++;
         ring->read_pos = rp + 1;
@@ -118,8 +122,10 @@ void mpfs_console_putc(FWTPM_CONSOLE_RING *ring, char c)
 /* -------------------------------------------------------------------- */
 /* printf backend (newlib _write syscall)                                */
 /*                                                                       */
-/* Writes to both UART4 and the console ring buffer so output is         */
-/* available via physical UART (if routed) and from Linux via /dev/mem.  */
+/* Writes to the console ring (read from Linux via /dev/mem) and UART4.   */
+/* The ring is written FIRST -- it is the primary readback path (UART4    */
+/* may be unrouted), so it is populated even if the UART TX wait times    */
+/* out.                                                                   */
 /* -------------------------------------------------------------------- */
 
 int _write(int fd, const char *buf, int len)
@@ -128,13 +134,13 @@ int _write(int fd, const char *buf, int len)
     (void)fd;
     for (i = 0; i < len; i++) {
         if (buf[i] == '\n') {
-            mpfs_uart_putc(FWTPM_UART_BASE, '\r');
             if (g_console_ring != NULL)
                 mpfs_console_putc(g_console_ring, '\r');
+            mpfs_uart_putc(FWTPM_UART_BASE, '\r');
         }
-        mpfs_uart_putc(FWTPM_UART_BASE, buf[i]);
         if (g_console_ring != NULL)
             mpfs_console_putc(g_console_ring, buf[i]);
+        mpfs_uart_putc(FWTPM_UART_BASE, buf[i]);
     }
     return len;
 }
@@ -200,13 +206,15 @@ int mpfs_rng_seed_cb(unsigned char *output, unsigned int sz)
     unsigned int i;
     uint64_t t;
     uint64_t mix = 0;
+    volatile int k;
 
     for (i = 0; i < sz; i++) {
         t = mpfs_rdtime();
         mix ^= t;
         mix = (mix * 6364136223846793005ULL) + 1442695040888963407ULL;
         output[i] = (unsigned char)(mix >> 33);
-        { volatile int k; for (k = 0; k < 8; k++) { } }
+        /* Short delay so successive MTIME reads land on different ticks. */
+        for (k = 0; k < 8; k++) { }
     }
     return 0;
 }

@@ -40,52 +40,49 @@ extern "C" {
 /*   0x08001040  FWTPM_TIS_REGS     (~8.2 KB -- regs + cmd/rsp FIFOs)   */
 /*   0x08004000  End (16 KB total)                                      */
 /*                                                                       */
-/* HSS partitions the 2 MB L2 SRAM into 4w scratchpad + 8w cache + 4w  */
-/* LIM (= 512 KiB at 0x08000000-0x0807FFFF on the Video Kit). LIM is   */
-/* L2 SRAM repurposed as scratchpad and is reachable by every master   */
-/* through the L2 bus.                                                  */
+/* LIM is L2 SRAM repurposed as scratchpad, reachable by every master   */
+/* over the L2 bus. The mailbox must be non-cached for the               */
+/* bare-metal hart 4 to observe Linux's writes (U54 L1d is               */
+/* write-back, no CMO); the default uses a non-cached DDR window.        */
 /*                                                                       */
-/* Both directions of linux-client/fwtpm_smoke.py PASS under HSS AMP    */
-/* (verified on the Video Kit): HSS sets up hart 4's PMP/PMA, so the    */
-/* cacheable L2 LIM mailbox is coherent for hart 4 and Linux's          */
-/* /dev/mem writes are observed. (An earlier standalone skip-opensbi    */
-/* bring-up without that setup saw Phase 2 stale-read; the U54 L1d is   */
-/* write-through and pre-Zicbom, so a fence could not fix it there.)    */
-/* The transport is build-selectable via FWTPM_XPORT (see Makefile):    */
-/*   LIM_CACHED    default -- cacheable L2 LIM; works                   */
-/*   DDR_NONCACHED 64-bit non-cached DDR alias 0x1400000000 + PMP;      */
-/*                 works (fully uncached alternative)                   */
-/*   L1D_OFF       DEAD END -- csrw 0x7C1 halts hart 4 (see startup.S)  */
-/*   IHC           Microchip Inter-Hart Comm (stub; bitstream-gated)    */
-/* See the README "Transport options" table and roadmap.               */
+/* Transport is build-selectable via FWTPM_XPORT (see Makefile):        */
+/*   DDR_WCB       default -- 0xC0000000 non-cached write-combine DDR    */
+/*   LIM_CACHED    cacheable L2 LIM (needs HSS that sets hart-4 PMA)     */
+/*   DDR_NONCACHED non-cached DDR alias 0x1400000000 + PMP               */
+/*   L1D_OFF       DEAD END -- csrw 0x7C1 halts hart 4 (see startup.S)   */
+/*   IHC           Inter-Hart Comm (stub; bitstream-gated)              */
+/* See the README "Transport options" table.                            */
 /* -------------------------------------------------------------------- */
 
-/* Debug breadcrumb base: ALWAYS cacheable L2 LIM. startup.S writes the
- * progress/trap fields here before any PMP/cache setup runs, so it must
- * be an address reachable with no setup. Linux reads it via /dev/mem.
- * Never re-point this at a 64-bit alias (medany cannot la-reach it). */
+/* Debug breadcrumb base: ALWAYS L2 LIM. startup.S writes progress/trap
+ * fields here before any PMP/cache setup, so it must need no setup and
+ * stay la-reachable under medany. Linux reads it via /dev/mem. */
 #define FWTPM_DBG_BASE         0x08000000UL
 
-/* Live mailbox + console ring + TIS regs base. Selectable per transport
- * candidate so the spike can move the shared region out of cacheable
- * LIM without disturbing the always-LIM debug breadcrumbs. Only
- * DDR_NONCACHED relocates it; L1D_OFF and IHC keep the LIM base. */
+/* Live mailbox + console ring + TIS regs base. Only DDR_NONCACHED
+ * relocates it (out of cacheable LIM); the debug breadcrumbs always
+ * stay in LIM. */
 #if defined(FWTPM_XPORT_DDR_NONCACHED)
     #define FWTPM_TIS_SHM_BASE 0x1400000000UL /* non-cached 64-bit DDR alias */
+#elif defined(FWTPM_XPORT_DDR_WCB)
+    #define FWTPM_TIS_SHM_BASE 0xC0000000UL   /* non-cached 32-bit DDR (WCB) */
 #else
     #define FWTPM_TIS_SHM_BASE 0x08000000UL   /* L2 LIM */
 #endif
 #define FWTPM_TIS_SHM_SIZE     0x4000UL      /* 16 KB total */
 
-/* Transport-candidate IDs reported in mailbox.xport_id so the Linux
- * client can confirm which spike build it is talking to. */
+/* Transport IDs reported in mailbox.xport_id so the Linux client can
+ * confirm which transport build it is talking to. */
 #define FWTPM_XPORT_ID_LIM_CACHED     1
 #define FWTPM_XPORT_ID_DDR_NONCACHED  2
 #define FWTPM_XPORT_ID_L1D_OFF        3
 #define FWTPM_XPORT_ID_IHC            4
+#define FWTPM_XPORT_ID_DDR_WCB        5
 
 #if defined(FWTPM_XPORT_DDR_NONCACHED)
     #define FWTPM_XPORT_ID  FWTPM_XPORT_ID_DDR_NONCACHED
+#elif defined(FWTPM_XPORT_DDR_WCB)
+    #define FWTPM_XPORT_ID  FWTPM_XPORT_ID_DDR_WCB
 #elif defined(FWTPM_XPORT_L1D_OFF)
     #define FWTPM_XPORT_ID  FWTPM_XPORT_ID_L1D_OFF
 #elif defined(FWTPM_XPORT_IHC)
@@ -126,7 +123,7 @@ typedef struct FWTPM_MPFS_MAILBOX {
     volatile uint32_t rsp_ready;      /* 0x0C Server sets 1, client clears */
     volatile uint32_t server_alive;   /* 0x10 Server sets 1 after FWTPM_Init */
     volatile uint32_t progress;       /* 0x14 Boot progress (FWTPM_PROG_*) */
-    volatile uint32_t rc;             /* 0x18 Last status code */
+    volatile uint32_t rc;             /* 0x18 init status, then poll/liveness counter (see fwtpm_tis_mpfs.c) */
     volatile uint32_t echo_nonce;     /* 0x1C Server echoes client cmd nonce */
     volatile uint32_t trap_marker;    /* 0x20 FWTPM_TRAP_MAGIC if trapped */
     volatile uint32_t xport_id;       /* 0x24 FWTPM_XPORT_ID_* of this build */
@@ -135,35 +132,27 @@ typedef struct FWTPM_MPFS_MAILBOX {
     volatile uint64_t trap_mtval;     /* 0x38 csr mtval */
 } FWTPM_MPFS_MAILBOX;                 /* 0x40 = 64 bytes */
 
-/* cmd_ready protocol note: the client writes a nonzero, changing NONCE
- * (not a literal 1) to request service; the server copies it into
- * echo_nonce before clearing cmd_ready. A matching echo_nonce proves
- * hart 4 observed the NEW write rather than a stale cached line --
- * the discriminator the coherency spike needs. */
+/* cmd_ready protocol: the client writes a nonzero, changing nonce (not a
+ * literal 1) to request service; the server copies it into echo_nonce
+ * before clearing cmd_ready. A matching echo_nonce proves hart 4 saw the
+ * new write, not a stale cached line. */
 
 /* -------------------------------------------------------------------- */
-/* Console ring buffer: fwTPM printf output readable from Linux         */
+/* Console ring buffer: fwTPM printf output readable from Linux          */
 /*                                                                       */
-/* Server writes to ring[write_pos % size], advances write_pos.         */
-/* Client reads from ring[read_pos % size], advances read_pos.          */
-/* Both positions only increase (mod arithmetic for wrap).              */
-/* No locking needed: single producer, single consumer.                 */
-/* Overwrite-oldest: when full the producer advances read_pos to drop    */
-/* the oldest byte (and bumps overflow_cnt) so the newest output is      */
-/* always kept -- this is a diagnostic ring with no draining consumer.   */
-/* A reader reconstructs the last min(write_pos, size) bytes ending at   */
-/* write_pos % size.                                                     */
-/* Positions are 64-bit monotonic counters: at full UART rate they will */
-/* not wrap for ~600k years, so write_pos % size never sees a 2^N       */
-/* boundary discontinuity (a 32-bit counter would, given the non-power- */
-/* of-two ring size). Header stays 32 bytes so the data offset and the  */
-/* overall shared-memory layout are unchanged.                          */
+/* Single producer (server), single consumer (Linux), no locking. The    */
+/* server writes data[write_pos % size]; positions are 64-bit monotonic   */
+/* counters (no practical wrap). Overwrite-oldest: when full the producer  */
+/* advances read_pos and bumps overflow_cnt, so the newest output is      */
+/* always kept (nothing drains this diagnostic ring). A reader takes the   */
+/* last min(write_pos, size) bytes ending at write_pos % size. The 32-byte */
+/* header keeps the shared-memory layout unchanged.                       */
 /* -------------------------------------------------------------------- */
 #define FWTPM_CONSOLE_RING_SIZE  4064  /* 4KB - 32 bytes header */
 
 typedef struct FWTPM_CONSOLE_RING {
     volatile uint64_t write_pos;     /* Server's write position */
-    volatile uint64_t read_pos;      /* Client's read position (client owns) */
+    volatile uint64_t read_pos;      /* Oldest retained byte (producer advances on overflow) */
     volatile uint32_t size;          /* Ring data size (FWTPM_CONSOLE_RING_SIZE) */
     volatile uint32_t overflow_cnt;  /* Dropped bytes counter */
     volatile uint32_t reserved[2];   /* Pad header to 32 bytes */

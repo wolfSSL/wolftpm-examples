@@ -38,11 +38,9 @@
 #include <string.h>
 #include <stdio.h>
 
-/* The boot/trap breadcrumb fields are written from startup.S using
- * absolute literal offsets (the FWTPM_OFF_* .equ values there). Guard the
- * C struct layout against drift so a struct change cannot silently desync
- * the assembler -- this fails the build instead. Keep in sync with
- * startup.S and the linux-client field offsets. */
+/* startup.S writes the breadcrumb fields at absolute offsets (its
+ * FWTPM_OFF_* literals); this static assert fails the build if the
+ * struct layout drifts out of sync. */
 typedef char fwtpm_mbox_layout_check[
     (offsetof(FWTPM_MPFS_MAILBOX, progress)    == 0x14 &&
      offsetof(FWTPM_MPFS_MAILBOX, echo_nonce)  == 0x1C &&
@@ -53,10 +51,8 @@ typedef char fwtpm_mbox_layout_check[
      offsetof(FWTPM_MPFS_MAILBOX, trap_mtval)  == 0x38 &&
      sizeof(FWTPM_MPFS_MAILBOX)                == 0x40) ? 1 : -1];
 
-/* The mailbox + console ring + TIS register block must fit inside the
- * fixed 16 KB LIM window. sizeof(FWTPM_TIS_REGS) comes from the wolfTPM
- * header and grows with FWTPM_MAX_COMMAND_SIZE (e.g. enabling ML-DSA);
- * fail the build rather than silently overrun LIM at runtime. */
+/* Fail the build if the mailbox + console ring + TIS regs overrun the
+ * 16 KB LIM window (FWTPM_TIS_REGS grows with FWTPM_MAX_COMMAND_SIZE). */
 typedef char fwtpm_tis_region_fits[
     (FWTPM_TIS_REGS_OFFSET + sizeof(FWTPM_TIS_REGS) <= FWTPM_TIS_SHM_SIZE)
         ? 1 : -1];
@@ -69,6 +65,7 @@ typedef struct {
 } FWTPM_TIS_MPFS_CTX;
 
 static FWTPM_TIS_MPFS_CTX g_mpfs_ctx;
+static uint32_t g_pollcnt = 0;   /* DDR_WCB buffer-cycle + server liveness */
 
 /* -------------------------------------------------------------------- */
 /* HAL callbacks                                                         */
@@ -79,21 +76,18 @@ static int TisMpfsInit(void *ctx, FWTPM_TIS_REGS **regs)
     FWTPM_TIS_MPFS_CTX *mc = (FWTPM_TIS_MPFS_CTX *)ctx;
     uint8_t *base = (uint8_t *)(uintptr_t)FWTPM_TIS_SHM_BASE;
 
-    /* Direct pointers into the shared region -- no mmap in M-mode. The
-     * base is FWTPM_TIS_SHM_BASE (L2 LIM, or the non-cached DDR alias
-     * under the DDR_NONCACHED spike build). */
+    /* Direct pointers into the shared region -- no mmap in M-mode. Base is
+     * FWTPM_TIS_SHM_BASE (L2 LIM, or the DDR alias under DDR_NONCACHED). */
     mc->mbox    = (FWTPM_MPFS_MAILBOX *)(base + FWTPM_MBOX_OFFSET);
     mc->console = (FWTPM_CONSOLE_RING *)(base + FWTPM_CONSOLE_OFFSET);
     mc->regs    = (FWTPM_TIS_REGS *)   (base + FWTPM_TIS_REGS_OFFSET);
 
-    /* Clear only the TIS regs/FIFO area. The mailbox and console ring
-     * already contain state written by main() before FWTPM_TIS_Init()
-     * (progress markers, banner output) and must be preserved. */
+    /* Clear only the TIS regs/FIFOs; the mailbox and console ring hold
+     * state from main() (progress, banner) that must be preserved. */
     memset((void *)mc->regs, 0, sizeof(*mc->regs));
 
-    /* Init mailbox signaling fields. Magic/version/progress already
-     * set by startup.S and main(), but re-asserting magic/version
-     * here is harmless and self-documenting. */
+    /* Init mailbox signaling fields (re-asserting magic/version is
+     * harmless and self-documenting). */
     mc->mbox->magic = FWTPM_MBOX_MAGIC;
     mc->mbox->version = FWTPM_MBOX_VERSION;
     mc->mbox->cmd_ready = 0;
@@ -117,37 +111,80 @@ static int TisMpfsInit(void *ctx, FWTPM_TIS_REGS **regs)
     return 0;
 }
 
+/* LIM_CACHED only: the U54 L1 data cache is write-back with NO cache-
+ * maintenance instruction (the core predates Zicbom), so on the cacheable LIM
+ * mailbox hart-4 writes do not reach the shared L2 and hart-4 reads do not see
+ * Linux's writes. Reading a block several times the L1d size cycles it (random
+ * replacement), evicting the mailbox lines. NOTE: this is unreliable on a
+ * write-back cache and is superseded by a genuinely non-cached transport
+ * (FWTPM_XPORT=DDR_WCB / DDR_NONCACHED) when the platform provides one. */
+#if defined(FWTPM_XPORT_LIM_CACHED)
+#define FWTPM_L1D_EVICT_BYTES  (256u * 1024u)
+static void TisMpfsEvictL1D(void)
+{
+    volatile const uint8_t *p =
+        (volatile const uint8_t *)(uintptr_t)FWTPM_TIS_SHM_BASE;
+    volatile uint8_t sink = 0;
+    uint32_t i;
+
+    for (i = 0; i < FWTPM_L1D_EVICT_BYTES; i += 64)
+        sink += p[i];
+    (void)sink;
+}
+#endif
+
 static int TisMpfsWaitRequest(void *ctx)
 {
     FWTPM_TIS_MPFS_CTX *mc = (FWTPM_TIS_MPFS_CTX *)ctx;
 #if defined(FWTPM_XPORT_IHC)
-    /* IHC backend not wired yet (gated on the Video Kit Libero bitstream
-     * containing the IHC IP). Return -1 so FWTPM_TIS_ServerLoop treats it
-     * as EINTR-continue and idles cleanly instead of busy-spinning a dead
-     * channel. The real backend will block on an IHC message here. */
+    /* IHC backend not wired yet (gated on a Libero bitstream with the IHC
+     * IP). Returns -1 (EINTR-continue); ServerLoop has no backoff, so this
+     * unbuilt stub would busy-spin -- harmless since hart 4 is dedicated.
+     * The real backend will block on an IHC message here. */
     (void)mc;
     return -1;
 #else
     uint32_t nonce;
 
-    /* Poll cmd_ready (a client-supplied nonzero nonce). Under HSS AMP
-     * (which sets up hart 4's PMP/PMA) the cacheable L2 LIM mailbox is
-     * coherent for hart 4 and Linux's /dev/mem writes are observed here
-     * -- the full round-trip is verified on the Video Kit. The stale-read
-     * issue only appeared in a standalone skip-opensbi bring-up without
-     * that setup; DDR_NONCACHED is a fully-uncached alternative. */
-    while (mc->mbox->cmd_ready == 0) {
-        __asm__ volatile("fence iorw, iorw" ::: "memory");
+    /* Poll cmd_ready (a client-supplied nonzero nonce). On LIM_CACHED, evict
+     * the L1d each iteration so Linux's write is observed; on a non-cached
+     * transport (DDR_WCB/DDR_NONCACHED) accesses bypass the cache and no evict
+     * is needed. */
+    for (;;) {
+#if defined(FWTPM_XPORT_LIM_CACHED)
+        TisMpfsEvictL1D();
+#endif
+#if defined(FWTPM_XPORT_DDR_WCB)
+        /* DDR_WCB: a write to the non-cached window cycles the write-combine
+         * buffer which, with the following fence, forces the next cmd_ready
+         * read to be served from DDR rather than a stale/buffered value (a
+         * bare fence alone did not). g_pollcnt doubles as a liveness counter. */
+        mc->mbox->rc = ++g_pollcnt;
+        mpfs_fence_rw();
+#else
+        /* Other transports: no write-combine buffer to cycle, so avoid the
+         * per-iteration mailbox write and full fence (needless bus traffic);
+         * a read fence is enough to order the cmd_ready poll. Keep the
+         * liveness counter ticking. */
+        ++g_pollcnt;
+        mpfs_fence_r();
+#endif
+        if (mc->mbox->cmd_ready != 0)
+            break;
     }
     nonce = mc->mbox->cmd_ready;
 
-    mpfs_fence_r();
-
-    /* Echo the nonce so the client can confirm hart 4 observed THIS write
-     * rather than a stale cached line, then acknowledge by clearing. */
+    /* Echo the nonce so the client can confirm hart 4 observed THIS write,
+     * then acknowledge by clearing cmd_ready (write-through reaches L2). */
     mc->mbox->echo_nonce = nonce;
     mc->mbox->cmd_ready = 0;
-    mpfs_fence_w();
+    mpfs_fence_rw();
+#if defined(FWTPM_XPORT_LIM_CACHED)
+    /* Evict again so the ServerLoop's reads of the client-written TIS reg
+     * fields (reg_addr/reg_is_write/reg_len/reg_data) re-fetch from L2
+     * instead of a stale L1d line left over from a prior access. */
+    TisMpfsEvictL1D();
+#endif
     return 0;
 #endif
 }
@@ -156,8 +193,13 @@ static int TisMpfsSignalResponse(void *ctx)
 {
     FWTPM_TIS_MPFS_CTX *mc = (FWTPM_TIS_MPFS_CTX *)ctx;
 
-    mpfs_fence_w();
+    /* Flush the response payload (reg_data/sts/rsp_buf written by the core's
+     * TisHandleRegAccess) out of the write-combine buffer BEFORE raising
+     * rsp_ready, then flush rsp_ready itself, so the client never observes
+     * the ready flag ahead of the data it gates (DDR_WCB ordering). */
+    mpfs_fence_rw();
     mc->mbox->rsp_ready = 1;
+    mpfs_fence_rw();
 
     /* Optional: IPI to wake Linux hart for low-latency notification.
      * Uncomment when a Linux kernel driver handles MSIP[1]. */

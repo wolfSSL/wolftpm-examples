@@ -43,15 +43,18 @@ DEFS  = -DWOLFSSL_USER_SETTINGS
 DEFS += -DWOLFTPM_USER_SETTINGS
 DEFS += -DMPFS250T_U54_FWTPM
 
-# Transport backend for the shared TIS mailbox.
-#   LIM_CACHED    default -- cacheable L2 LIM; full round-trip works
-#                 under HSS AMP (verified on the Video Kit)
-#   DDR_NONCACHED mailbox in 0x1400000000 non-cached DDR alias (+ PMP);
-#                 also works (fully-uncached alternative)
+# Transport backend for the shared TIS mailbox. The U54 L1d is write-back
+# with no cache-maintenance instruction, so the mailbox must live in
+# genuinely non-cached memory to be coherent for hart 4 under the stock HSS.
+#   DDR_WCB       default -- mailbox in the 0xC0000000 non-cached DDR window;
+#                 coherent for hart 4 and Linux (used by the demo)
+#   LIM_CACHED    cacheable L2 LIM; coherent only under an HSS that sets up
+#                 hart-4 PMA for LIM (not the stock Yocto HSS)
+#   DDR_NONCACHED 0x1400000000 non-cached 64-bit DDR alias (+ PMP)
 #   L1D_OFF       dead end: csrw 0x7C1 halts hart 4 (see startup.S)
 #   IHC           Microchip Inter-Hart Comm stub (bitstream-gated)
-# Build a candidate with e.g.: make clean && make FWTPM_XPORT=DDR_NONCACHED
-FWTPM_XPORT ?= LIM_CACHED
+# Build a candidate with e.g.: make clean && make FWTPM_XPORT=LIM_CACHED
+FWTPM_XPORT ?= DDR_WCB
 XPORT_DEF    = -DFWTPM_XPORT_$(FWTPM_XPORT)
 DEFS        += $(XPORT_DEF)
 
@@ -206,9 +209,9 @@ help:
 	@echo "  make clean"
 	@echo ""
 	@echo "Variables:"
-	@echo "  FWTPM_XPORT=      Transport backend (coherency spike):"
-	@echo "                    LIM_CACHED (default) | DDR_NONCACHED |"
-	@echo "                    L1D_OFF | IHC"
+	@echo "  FWTPM_XPORT=      Transport backend:"
+	@echo "                    DDR_WCB (default) | LIM_CACHED |"
+	@echo "                    DDR_NONCACHED | L1D_OFF | IHC"
 	@echo "  FWTPM_RNG=        DRBG seed source:"
 	@echo "                    SCB_NONCE (default, HW TRNG) | JITTER (dev-only)"
 	@echo "  FWTPM_DEV_INSECURE_RNG=1  acknowledge the JITTER dev seed (else #error)"
