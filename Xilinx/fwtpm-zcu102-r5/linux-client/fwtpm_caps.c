@@ -11,8 +11,9 @@
  * walks the returned property list. The response is kept well under the
  * single-frame rpmsg payload (~496 bytes) by requesting a bounded count.
  *
- * Duplicated as the PetaLinux recipe source
- * (recipes-apps/fwtpm-caps/files/fwtpm_caps.c); keep both copies identical.
+ * Single source of truth: the PetaLinux recipe
+ * (recipes-apps/fwtpm-caps/fwtpm-caps_0.1.0.bb) builds this exact file via
+ * FILESEXTRAPATHS, so there is no separate copy to keep in sync.
  *
  * Build (PetaLinux SDK or aarch64 cross):
  *   aarch64-linux-gnu-gcc -O2 -Wall -o fwtpm_caps fwtpm_caps.c
@@ -42,6 +43,9 @@
 
 #define RPMSG_CTRL "/dev/rpmsg_ctrl0"
 #define EPT_NAME   "wolftpm"
+
+/* Capability selector echoed back in a GetCapability response. */
+#define TPM_CAP_TPM_PROPERTIES  0x00000006u
 
 /* TPM property tags (TCG TPM 2.0 Part 2, PT_FIXED group). */
 #define PT_FAMILY_INDICATOR     0x00000100u
@@ -79,6 +83,15 @@ static uint32_t be32(const uint8_t* p)
 {
     return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
            ((uint32_t)p[2] << 8)  | (uint32_t)p[3];
+}
+
+/* Tear down an endpoint returned by open_endpoint(): destroy the rpmsg
+ * endpoint first so repeated runs do not leak /dev/rpmsg<N> char devices,
+ * then close the fd. Used on every exit path once the endpoint is open. */
+static void close_endpoint(int fd)
+{
+    (void)ioctl(fd, RPMSG_DESTROY_EPT_IOCTL, 0);
+    close(fd);
 }
 
 static int open_endpoint(void)
@@ -134,20 +147,12 @@ static int open_endpoint(void)
         usleep(50000);
     }
     fprintf(stderr, "no new /dev/rpmsg<N> appeared after CREATE_EPT_IOCTL\n");
-    /* Best-effort: reclaim the endpoint we created so repeated runs do not leak
-     * char devices. DESTROY acts on an opened endpoint fd, so open any node
-     * that appeared post-CREATE and destroy through it. */
-    for (i = 0; i < 32; i++) {
-        if (existed[i]) {
-            continue;
-        }
-        snprintf(dev_path, sizeof(dev_path), "/dev/rpmsg%d", i);
-        ept_fd = open(dev_path, O_RDWR);
-        if (ept_fd >= 0) {
-            (void)ioctl(ept_fd, RPMSG_DESTROY_EPT_IOCTL, 0);
-            close(ept_fd);
-        }
-    }
+    /* Do not try to reclaim here: RPMSG_DESTROY_EPT_IOCTL acts on an opened
+     * endpoint fd, and on this path we never opened ours. A snapshot-diff sweep
+     * that destroys every node absent from the pre-CREATE snapshot could tear
+     * down an endpoint another process created concurrently, so we accept a
+     * possible endpoint leak in this abnormal case rather than destroy a node
+     * we cannot positively attribute to ourselves. */
     close(ctrl_fd);
     return -1;
 }
@@ -178,7 +183,7 @@ int main(void)
     int fd;
     uint8_t rsp[1024];
     ssize_t n;
-    uint32_t rc, count, off;
+    uint32_t rc, count, off, cap;
     uint32_t i;
     uint32_t family = 0, level = 0, revision = 0;
     uint32_t manuf = 0, vtype = 0, fw1 = 0, fw2 = 0;
@@ -200,31 +205,31 @@ int main(void)
     n = write(fd, cmd_startup, sizeof(cmd_startup));
     if (n < 0) {
         fprintf(stderr, "Startup: write: %s\n", strerror(errno));
-        close(fd);
+        close_endpoint(fd);
         return 1;
     }
     if (n != (ssize_t)sizeof(cmd_startup)) {
         fprintf(stderr, "Startup: short write %zd/%zu\n", n,
                 sizeof(cmd_startup));
-        close(fd);
+        close_endpoint(fd);
         return 1;
     }
     n = read(fd, rsp, sizeof(rsp));
     if (n < 0) {
         fprintf(stderr, "Startup: read: %s\n", strerror(errno));
-        close(fd);
+        close_endpoint(fd);
         return 1;
     }
     if (n < 10) {
         fprintf(stderr, "Startup: short read %zd\n", n);
-        close(fd);
+        close_endpoint(fd);
         return 1;
     }
     /* TPM_RC_INITIALIZE (0x100) means already started -- not an error. */
     rc = be32(rsp + 6);
     if (rc != 0 && rc != 0x00000100u) {
         fprintf(stderr, "Startup: rc=0x%08x\n", rc);
-        close(fd);
+        close_endpoint(fd);
         return 1;
     }
 
@@ -232,36 +237,51 @@ int main(void)
     n = write(fd, cmd_getcap_fixed, sizeof(cmd_getcap_fixed));
     if (n < 0) {
         fprintf(stderr, "GetCapability: write: %s\n", strerror(errno));
-        close(fd);
+        close_endpoint(fd);
         return 1;
     }
     if (n != (ssize_t)sizeof(cmd_getcap_fixed)) {
         fprintf(stderr, "GetCapability: short write %zd/%zu\n", n,
                 sizeof(cmd_getcap_fixed));
-        close(fd);
+        close_endpoint(fd);
         return 1;
     }
     n = read(fd, rsp, sizeof(rsp));
     if (n < 0) {
         fprintf(stderr, "GetCapability: read: %s\n", strerror(errno));
-        close(fd);
+        close_endpoint(fd);
         return 1;
     }
     if (n < 19) {
         fprintf(stderr, "GetCapability: short read %zd\n", n);
-        close(fd);
+        close_endpoint(fd);
         return 1;
     }
     rc = be32(rsp + 6);
     if (rc != 0) {
         fprintf(stderr, "GetCapability: rc=0x%08x\n", rc);
-        close(fd);
+        close_endpoint(fd);
         return 1;
     }
 
     /* Response: header(10) moreData(1) capability(4) count(4) then
      * count * (property(4) value(4)) pairs starting at offset 19. */
+    cap   = be32(rsp + 11);
     count = be32(rsp + 15);
+    /* Reject a malformed or truncated property list: wrong capability, an
+     * empty list, or a count whose 8-byte pairs do not fit in the bytes
+     * actually returned. A single-frame reply that dropped later properties
+     * must fail here rather than print "OK" from the default zero fields.
+     * n >= 19 is guaranteed by the short-read check above, so (n - 19) does
+     * not underflow. */
+    if (cap != TPM_CAP_TPM_PROPERTIES || count == 0 ||
+        count > ((uint32_t)n - 19u) / 8u) {
+        fprintf(stderr,
+                "GetCapability: malformed response (cap=0x%08x count=%u "
+                "len=%zd)\n", cap, count, n);
+        close_endpoint(fd);
+        return 1;
+    }
     off = 19;
     for (i = 0; i < count; i++) {
         if (off + 8 > (uint32_t)n) {
@@ -304,6 +324,6 @@ int main(void)
     printf("---------------------------------------------------------\n");
     printf("GetCapability OK (rc=0x00000000)\n\n");
 
-    close(fd);
+    close_endpoint(fd);
     return 0;
 }

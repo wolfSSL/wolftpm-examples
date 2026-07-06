@@ -115,8 +115,22 @@ void mpfs_console_putc(FWTPM_CONSOLE_RING *ring, char c)
     }
 
     ring->data[wp % ring->size] = c;
+#if defined(FWTPM_XPORT_DDR_WCB)
+    /* DDR_WCB: the ring lives in the non-cached write-combine window, so
+     * publish the byte and then the write_pos with a full fence rw,rw on
+     * each side -- the same ordering the mailbox poll path uses. A bare
+     * fence w,w (used below for LIM/other transports) proved insufficient
+     * to force the write-combine buffer out to DDR for the mailbox
+     * (see TisMpfsWaitRequest), so the ring producer must not rely on it
+     * either: without this a Linux reader could observe an advanced
+     * write_pos ahead of the data byte it gates. */
+    mpfs_fence_rw();
+    ring->write_pos = wp + 1;
+    mpfs_fence_rw();
+#else
     mpfs_fence_w();
     ring->write_pos = wp + 1;
+#endif
 }
 
 /* -------------------------------------------------------------------- */

@@ -7,6 +7,10 @@ examples/wrap/caps."
 LICENSE = "GPL-3.0-or-later"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-3.0-or-later;md5=1c76c4cc354acaac30ed4d5eefea7245"
 
+# Build the single client source under linux-client/ directly -- no separate
+# files/ copy to keep in sync. Path is relative to this recipe directory.
+FILESEXTRAPATHS:prepend := "${THISDIR}/../../../../../linux-client:"
+
 SRC_URI = "file://fwtpm_caps.c"
 
 S = "${WORKDIR}"

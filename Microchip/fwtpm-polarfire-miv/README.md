@@ -26,17 +26,27 @@ runs on harts 1-3 via HSS AMP. Build lives at `firmware/fwtpm-u54/`.
 
 ### Shared-memory layout (`fwtpm_tis_mpfs.h`)
 
-The mailbox lives in **L2 LIM** at `0x08000000`. LIM is the part of
-the 2 MB L2 cache SRAM that the cache controller is configured to
-expose as scratchpad memory; every master (E51, U54_1–4, AXI/DMA)
-reaches it through the L2 bus.
+There are two regions. The **debug breadcrumb block** (boot progress + trap
+mcause/mepc/mtval) always lives in **L2 LIM** at `0x08000000`: startup.S writes
+it before any cache/PMP setup and Linux reads it via `/dev/mem`. The **live
+mailbox + console ring + TIS registers** relocate per `FWTPM_XPORT` -- the
+default `DDR_WCB` build places them in the non-cached DDR window at
+`0xC0000000`; the `LIM_CACHED`/`L1D_OFF`/`IHC` builds keep them in LIM at
+`0x08000000`. LIM is the part of the 2 MB L2 cache SRAM exposed as scratchpad,
+reachable by every master (E51, U54_1-4, AXI/DMA) over the L2 bus.
+
+Layout of the 16 KB live region (offsets from the selected base, shown for the
+`DDR_WCB` default; a `LIM_CACHED` build has the same block at `0x08000000`):
 
 ```
-0x08000000  FWTPM_MPFS_MAILBOX   (64 B  — mailbox + boot debug + trap fields)
-0x08000040  FWTPM_CONSOLE_RING   (4 KB — server stdout, readable from /dev/mem)
-0x08001040  FWTPM_TIS_REGS       (~8.2 KB — TIS regs + cmd/rsp FIFOs)
-0x08004000  end
+0xC0000000  FWTPM_MPFS_MAILBOX   (64 B  - magic, cmd/rsp signalling, xport_id)
+0xC0000040  FWTPM_CONSOLE_RING   (4 KB - server stdout, readable from /dev/mem)
+0xC0001040  FWTPM_TIS_REGS       (~8.2 KB - TIS regs + cmd/rsp FIFOs)
+0xC0004000  end
 ```
+
+The authoritative boot/trap breadcrumbs stay in the LIM copy at `0x08000000`
+regardless of transport (read with `fwtpm_caps.py --dump`).
 
 #### Confirming HSS reserves enough LIM
 
@@ -225,6 +235,22 @@ stay pinned in LIM at `0x08000000`. `fwtpm_caps.py` defaults to that base; for a
 `--xport <backend>` (or `--base <addr>`) to point it at the live region,
 and it still reads those breadcrumbs from LIM automatically.
 
+> **Reserve the DDR window from Linux.** Unlike LIM, the `0xC0000000`
+> non-cached window aliases physical DDR that Linux may also own. On a
+> board where Linux and the fwTPM share DRAM, that 16 KB range MUST be
+> excluded from Linux's usable memory (a `reserved-memory`/`no-map`
+> carve-out) or hart 4 and Linux can clobber each other's pages.
+> `mpfs-fwtpm-disable-cpu4.dts` now ships an **active** `no-map` node for
+> the region (in addition to disabling cpu4), and a DDR build prints a
+> Makefile warning as a reminder. **Confirm the reserved base for your
+> board:** it must be the physical address Linux allocates from that backs
+> `0xC0000000` -- verify on the target with
+> `cat /proc/device-tree/reserved-memory/*/reg` and `/proc/iomem` against
+> the design's MSS seg config, and correct the node's `reg` if the seg map
+> aliases the window to a different address. Until confirmed, or if you
+> prefer no reservation, use `FWTPM_XPORT=LIM_CACHED` on a shared board
+> (LIM is outside Linux's DRAM map and needs no reservation).
+
 ### Boot debug fields
 
 `startup.S` writes `progress=0x10` at the very first instruction so even
@@ -246,9 +272,9 @@ wc_InitRng = 0
 wc_RNG_GenerateBlock(32) = 0
 Initializing fwTPM...
 fwTPM initialized successfully
-fwTPM TIS: Shared memory at 0x8000000 (16384 bytes)
+fwTPM TIS: Shared memory at 0xc0000000 (16384 bytes)
 fwTPM TIS: Console ring at offset 0x40 (4064 bytes)
-fwTPM TIS: transport id 1, poll-mode (no MSIP doorbell)
+fwTPM TIS: transport id 5, poll-mode (no MSIP doorbell)
 Entering TIS server loop (waiting for commands)
 fwTPM TIS: Server ready, waiting for register accesses...
 ```
@@ -327,6 +353,15 @@ the working stand-in until then.
      and owns the SBI on E51, with cross-hart mailboxes proven coherent
      in uncached DTIM (`0x01000000`) / non-cached DDR (SEG1) and an SBI
      vendor-EID doorbell available; tracked as a parallel investigation.
+   - **Regression coverage:** the earlier standalone `fwtpm_smoke.py`
+     (a Linux -> hart 4 nonce-echo round-trip) was retired in favor of the
+     read-only `fwtpm_caps.py`. That exercise is now restored as the opt-in
+     `fwtpm_caps.py --roundtrip` mode, which drives a DID_VID command
+     round-trip (echo-nonce + identity) so the default `DDR_WCB` command path
+     and the `TisMpfsWaitRequest` write-combine workaround regain automated
+     coverage. It is reported as a non-gating `DIAG` while the interactive
+     ordering is still being hardened; pass `--roundtrip-strict` to make it
+     gate the result.
    (`FWTPM_XPORT=L1D_OFF` is a dead end: the U54 `csrw 0x7C1` halts
    hart 4 before boot.)
 2. **Linux userspace TIS HAL** — once (1) lands, wrap the mailbox

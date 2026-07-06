@@ -59,9 +59,9 @@ extern "C" {
  * stay la-reachable under medany. Linux reads it via /dev/mem. */
 #define FWTPM_DBG_BASE         0x08000000UL
 
-/* Live mailbox + console ring + TIS regs base. Only DDR_NONCACHED
- * relocates it (out of cacheable LIM); the debug breadcrumbs always
- * stay in LIM. */
+/* Live mailbox + console ring + TIS regs base. DDR_WCB (the default) and
+ * DDR_NONCACHED relocate it out of cacheable LIM; L1D_OFF and IHC keep the
+ * LIM base. The debug breadcrumbs (FWTPM_DBG_BASE) always stay in LIM. */
 #if defined(FWTPM_XPORT_DDR_NONCACHED)
     #define FWTPM_TIS_SHM_BASE 0x1400000000UL /* non-cached 64-bit DDR alias */
 #elif defined(FWTPM_XPORT_DDR_WCB)

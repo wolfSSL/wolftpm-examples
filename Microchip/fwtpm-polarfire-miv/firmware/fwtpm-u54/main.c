@@ -63,7 +63,8 @@ static uint32_t fwtpm_be32(const uint8_t *p)
 static void fwtpm_caps_selftest(FWTPM_CTX *ctx)
 {
     uint8_t cmd[32];
-    uint8_t rsp[512];
+    uint8_t rsp[512] = {0};   /* zero-init: error-path RC decode never reads
+                              * indeterminate stack bytes into the console ring */
     int rspSize;
     int rc;
     unsigned int i;
@@ -108,8 +109,20 @@ static void fwtpm_caps_selftest(FWTPM_CTX *ctx)
         printf("  %s = 0x%08lx", names[i], (unsigned long)val);
         if (prop == 0x105UL || prop == 0x106UL) {
             char s[5];
-            s[0] = (char)(val >> 24); s[1] = (char)(val >> 16);
-            s[2] = (char)(val >> 8);  s[3] = (char)val; s[4] = 0;
+            uint8_t b[4];
+            unsigned int j;
+            /* Decode the 4 big-endian bytes to ASCII, stopping at the first
+             * non-printable byte so a stray value cannot inject control
+             * bytes into the console ring Linux later reads (mirrors the
+             * Xilinx client's append_ascii). */
+            b[0] = (uint8_t)(val >> 24); b[1] = (uint8_t)(val >> 16);
+            b[2] = (uint8_t)(val >> 8);  b[3] = (uint8_t)val;
+            for (j = 0; j < 4; j++) {
+                if (b[j] < 0x20 || b[j] >= 0x7F)
+                    break;
+                s[j] = (char)b[j];
+            }
+            s[j] = '\0';
             printf("  \"%s\"", s);
         }
         printf("\n");

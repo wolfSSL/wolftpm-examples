@@ -47,7 +47,8 @@ DEFS += -DMPFS250T_U54_FWTPM
 # with no cache-maintenance instruction, so the mailbox must live in
 # genuinely non-cached memory to be coherent for hart 4 under the stock HSS.
 #   DDR_WCB       default -- mailbox in the 0xC0000000 non-cached DDR window;
-#                 coherent for hart 4 and Linux (used by the demo)
+#                 coherent for hart 4 and Linux (used by the demo). Requires
+#                 a DTS reserved-memory carve-out (shipped in the overlay).
 #   LIM_CACHED    cacheable L2 LIM; coherent only under an HSS that sets up
 #                 hart-4 PMA for LIM (not the stock Yocto HSS)
 #   DDR_NONCACHED 0x1400000000 non-cached 64-bit DDR alias (+ PMP)
@@ -57,6 +58,19 @@ DEFS += -DMPFS250T_U54_FWTPM
 FWTPM_XPORT ?= DDR_WCB
 XPORT_DEF    = -DFWTPM_XPORT_$(FWTPM_XPORT)
 DEFS        += $(XPORT_DEF)
+
+# DDR_WCB (default) and DDR_NONCACHED place the live mailbox in DRAM that Linux
+# may also own. The applied device tree MUST reserve the backing region
+# (reserved-memory/no-map) or hart 4 and Linux can clobber each other's pages.
+# mpfs-fwtpm-disable-cpu4.dts ships that node -- confirm its phys base matches
+# the board's MSS DDR seg config. Warn (do not fail) so a plain build still
+# works but the reservation requirement is never silent.
+ifneq (,$(filter DDR_WCB DDR_NONCACHED,$(FWTPM_XPORT)))
+  $(warning FWTPM_XPORT=$(FWTPM_XPORT): mailbox lives in Linux-owned DRAM -- \
+apply mpfs-fwtpm-disable-cpu4.dts (reserves it) and confirm the phys base, or \
+build FWTPM_XPORT=LIM_CACHED if Linux and the fwTPM share DRAM and you are \
+unsure.)
+endif
 
 # DRBG seed source.
 #   SCB_NONCE (default) System Controller hardware TRNG (fwtpm_trng_scb.c)
