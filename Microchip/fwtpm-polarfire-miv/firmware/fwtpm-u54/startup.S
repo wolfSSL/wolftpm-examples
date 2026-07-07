@@ -45,14 +45,10 @@ _start:
     csrw mstatus, zero
 
 #ifdef FWTPM_XPORT_L1D_OFF
-    /* Coherency spike candidate L1D_OFF -- DEAD END (kept for reference).
-     * Intended to disable hart 4's L1 data cache via the SiFive U54
-     * Feature-Disable CSR (0x7C1). Bench result on the MPFS250T Video Kit:
-     * this csrw halts hart 4 before the first breadcrumb (progress stays
-     * 0), and mtvec is not set yet so no trap is recorded. The 0x7C1
-     * access is not usable here as written. It is also unnecessary: the
-     * cacheable L2 LIM mailbox is coherent for hart 4 under HSS AMP
-     * (LIM_CACHED works), and DDR_NONCACHED is the uncached alternative. */
+    /* L1D_OFF -- DEAD END (kept for reference). Would disable hart 4's L1
+     * data cache via the SiFive U54 Feature-Disable CSR (0x7C1), but on the
+     * Video Kit this csrw halts hart 4 before the first breadcrumb. It is
+     * also unnecessary: LIM is coherent under HSS AMP. */
     csrr t0, 0x7c1
     ori  t0, t0, 0x2
     csrw 0x7c1, t0
@@ -98,12 +94,10 @@ _start:
 2:
 
 #ifdef FWTPM_XPORT_DDR_NONCACHED
-    /* Coherency spike candidate DDR_NONCACHED: the live mailbox moves to
-     * the 64-bit non-cached DDR alias (0x1400000000). Under skip-opensbi
-     * nothing set up PMP; install one NAPOT entry covering all address
-     * space (R|W|X) so M-mode access to the alias is explicit. Must be in
-     * place before main() first touches the alias. Note: the breadcrumb
-     * stores above stay in LIM (0x08000000), which needs no PMP. */
+    /* DDR_NONCACHED: the live mailbox moves to the non-cached DDR alias
+     * (0x1400000000). Install one NAPOT PMP entry over all space (R|W|X)
+     * so M-mode can reach the alias, before main() touches it. The
+     * breadcrumbs above stay in LIM and need no PMP. */
     li   t0, -1               /* pmpaddr0 all-ones -> whole space (NAPOT) */
     csrw pmpaddr0, t0
     li   t0, 0x1f             /* pmpcfg0[0]: A=NAPOT(0x18)|X|W|R(0x07) */

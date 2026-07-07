@@ -36,6 +36,19 @@ Firmware TPM 2.0 running bare-metal on the Zynq UltraScale+ MPSoC R5 RPU
 in lock-step mode. PetaLinux on the A53 APU acts as TPM client over
 OpenAMP RPMsg via Linux remoteproc. Persistent NV in QSPI flash.
 
+## Microchip PolarFire SoC fwTPM on a RISC-V hart (AMP)
+
+See [Microchip/fwtpm-polarfire-miv](Microchip/fwtpm-polarfire-miv).
+
+Firmware TPM 2.0 running bare-metal in M-mode on a dedicated U54 RISC-V
+hart of the PolarFire SoC (MPFS250T Video Kit), split from Linux by HSS
+AMP partitioning (Linux on harts 1-3, fTPM on hart 4). Linux observes the
+fTPM over a shared-memory mailbox + console ring (non-cached DDR) via
+`/dev/mem`; the hart runs real TPM 2.0 commands (TPM2_GetCapability,
+TPM2_GetRandom from the System Controller TRNG) read live from Linux.
+
+Added in https://github.com/wolfSSL/wolftpm-examples/pull/2
+
 ## Xilinx UltraScale+ MPSoC with FreeRTOS, LWIP with wolfSSL/wolfTPM
 
 See: https://github.com/dgarske/UltraZed-EG-wolf

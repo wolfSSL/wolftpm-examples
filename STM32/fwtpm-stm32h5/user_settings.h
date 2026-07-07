@@ -49,6 +49,10 @@
     #define FWTPM_NV_FLASH_SIZE         (128 * 1024)
     #define FWTPM_NV_FLASH_SECTOR_SIZE  (8 * 1024)
     #define FWTPM_NV_FLASH_PROGRAM_SIZE 16  /* 128-bit quadword */
+    /* Internal flash is write-once and quadword-aligned, so use the fwTPM core
+     * append-only NV journal mode. Requires the wolfTPM "append" NV support
+     * from https://github.com/wolfSSL/wolfTPM/pull/540 (wolfTPM v4.1.0+). */
+    #define WOLFTPM_FWTPM_NV_APPEND_ONLY
 #else
     #warning "No STM32 chip defined - please add platform config"
 #endif

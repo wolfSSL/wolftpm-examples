@@ -77,6 +77,8 @@ petalinux/                  PetaLinux 2025.2 project (lock-step + carveouts)
   README.md                                 reproducible build/deploy steps
 deploy-to-sdcard.sh         Two-partition (FAT32+ext4) SD writer (host-side)
 linux-client/
+  fwtpm_caps.c              APU GetCapability "caps" client (the
+                            rpmsg analogue of examples/wrap/caps)
   fwtpm_rpmsg_test.c        APU TPM smoke test over /dev/rpmsg_ctrl0
                             (--pqc adds PT_ML_PARAMETER_SETS probe)
   fwtpm_pqc_test.c          ML-KEM-768 encap/decap + ML-DSA-65
@@ -294,9 +296,11 @@ a PMU mailbox service remains a possible future enhancement.
   All four TPM2 commands round-trip Linux APU <-> R5 RPU via
   OpenAMP rpmsg + IPI mailbox.
 - **Linux client over rpmsg-char**: `linux-client/fwtpm_rpmsg_test.c`
-  is the V1 smoke test (Startup/SelfTest/GetRandom/GetCapability).
-  A wolfTPM `--enable-swtpm=rpmsg` transport that runs the full
-  example suite is a follow-on.
+  is the V1 smoke test (Startup/SelfTest/GetRandom/GetCapability);
+  `linux-client/fwtpm_caps.c` is the `examples/wrap/caps` analogue that
+  decodes the fixed TPM properties (installed as `/usr/bin/fwtpm_caps`
+  via the `fwtpm-caps` recipe). A wolfTPM `--enable-swtpm=rpmsg`
+  transport that runs the full example suite is a follow-on.
 - **DEBUG_WOLFTPM uses bare `printf`/`fprintf(stderr, ...)`.**
   Bare-metal R5 has no working newlib stdio (no `_write` backend),
   so DEBUG-build logging in `fwtpm_nv.c` hangs at the first

@@ -11,7 +11,9 @@
  * runtime, a Linux mss-sys-services driver) drives the SCB mailbox while
  * hart 4 issues these requests, or the service can corrupt/stall. Under
  * the wolfBoot-hosted track this is the same path wolfBoot exposes as
- * mpfs_nonce(). BENCH-VALIDATE before relying on it for keys.
+ * mpfs_nonce(). Bench-validated on the MPFS250T Video Kit (seeds the DRBG;
+ * fwTPM init and the smoke test pass); the shared-mailbox contention above
+ * is the remaining item to confirm for a production deployment.
  *
  * Copyright (C) 2006-2026 wolfSSL Inc.
  *

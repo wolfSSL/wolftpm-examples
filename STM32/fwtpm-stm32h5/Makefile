@@ -35,6 +35,7 @@ SIZE    = $(PREFIX)size
 CPU = -mcpu=cortex-m33 -mthumb -mfpu=fpv5-sp-d16 -mfloat-abi=hard
 
 # Only USER_SETTINGS defines on command line — all others in user_settings.h
+# (incl. WOLFTPM_FWTPM_NV_APPEND_ONLY for the write-once internal-flash NV).
 DEFS = -DWOLFTPM_USER_SETTINGS -DWOLFSSL_USER_SETTINGS -DSTM32H563xx
 
 # TrustZone support: set TZEN=1 for TrustZone builds
