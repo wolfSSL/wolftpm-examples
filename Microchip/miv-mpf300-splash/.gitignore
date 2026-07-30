@@ -1,0 +1,20 @@
+# Build artifacts
+*.o
+*.d
+*.elf
+*.hex
+*.bin
+*.lst
+*.map
+
+# Local FPGA project / programming jobs dropped into fpga/ (not redistributed)
+fpga/*/
+fpga/*.job
+fpga/*.zip
+
+# Local-only notes / draft PR scratch (never committed)
+*.local.md
+
+# Python
+__pycache__/
+*.pyc

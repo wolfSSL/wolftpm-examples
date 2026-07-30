@@ -49,6 +49,12 @@ TPM2_GetRandom from the System Controller TRNG) read live from Linux.
 
 Added in https://github.com/wolfSSL/wolftpm-examples/pull/2
 
+## Microchip PolarFire MPF300 Splash Kit fwTPM on a Mi-V RV32 soft core
+
+See [Microchip/miv-mpf300-splash](Microchip/miv-mpf300-splash).
+
+Firmware TPM 2.0 on a soft MIV_RV32 RISC-V core instantiated in the fabric of a PolarFire MPF300 Splash Kit (a pure FPGA, no hardened CPU). Built and verified on hardware in stages: a CoreUARTapb hello-world with LED heartbeat, wolfCrypt test/benchmark from 512 KB LSRAM, and the fwTPM driven over UART with a hardware TRNG (the PolarFire System Controller NRBG) and persistent NV in the on-die secure NVM (sNVM) - both reached through a single CoreSysServices_PF block. Distinct from the PolarFire SoC (MPFS250T) port above, which runs on a hardened U54 hart.
+
 ## Xilinx UltraScale+ MPSoC with FreeRTOS, LWIP with wolfSSL/wolfTPM
 
 See: https://github.com/dgarske/UltraZed-EG-wolf
