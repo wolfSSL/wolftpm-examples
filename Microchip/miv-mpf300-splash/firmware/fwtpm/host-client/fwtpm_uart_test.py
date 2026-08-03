@@ -16,6 +16,9 @@ import serial
 
 PORT = sys.argv[1] if len(sys.argv) > 1 else "/dev/ttyUSB0"
 BAUD = 115200
+# Bound the device-announced response size (>= the device FWTPM_MAX_COMMAND_SIZE)
+# so a bogus 32-bit length cannot make the client block/allocate unboundedly.
+MAX_RSP = 8192
 ST_NO_SESSIONS = 0x8001
 
 # command codes
@@ -50,6 +53,8 @@ def xfer(ser, c):
     ser.write(c)
     hdr = read_exact(ser, 10)
     tag, size, rc = struct.unpack(">HII", hdr)
+    if size < 10 or size > MAX_RSP:
+        raise ValueError(f"bad response size {size} (max {MAX_RSP})")
     body = read_exact(ser, size - 10) if size > 10 else b""
     return rc, body
 

@@ -214,16 +214,42 @@ firmware-only and rides the same bitstream.
 `firmware/fwtpm/fwtpm_nv_snvm.c` implements the fwTPM NV HAL over a block of
 sNVM pages (base page 128, 65 pages = ~16 KB), high in the 221-page sNVM array
 and clear of the pages the FPGA design uses. A RAM shadow is loaded once at boot
-so reads are fast; a write updates the shadow and re-programs only the touched
-sNVM page(s), which keeps the sNVM write count down.
+so reads are fast; a write re-programs only the touched sNVM page(s) and commits
+each page into the shadow only after its sNVM write succeeds, so the shadow never
+gets ahead of flash and the sNVM write count stays low.
 
-Pages use non-authenticated plaintext mode by default. For a production TPM,
-build with `EXTRA_CFLAGS=-DMIV_SNVM_NV_AUTH` to use the authenticated-ciphertext
-service, so each page is encrypted and integrity-checked with the on-die factory
-key plus an application key. Authenticated mode additionally requires the FPGA
-design's security policy to permit authenticated sNVM writes (configured in the
-Libero Security Policy Manager); without that provisioning the System Controller
-rejects the write with `SNVM_WRITE_NOT_PERMITTED`, so it is off by default here.
+The NV journal is integrity-checked. The fwTPM core HMACs its journal with a key
+the HAL supplies, and this build wires that key on. By default the key is device-
+derived: a per-device value is generated once from the hardware NRBG and persisted
+in a dedicated sNVM key page so the MAC is stable across power cycles. What that
+protects depends on where the key lives. In the default plaintext build the key
+sits in plaintext sNVM next to the data, so it is not secret from an attacker with
+sNVM read access: the MAC catches accidental corruption and rejects an NV journal
+transplanted from another device, but it does not stop rollback or tampering by an
+attacker who can read sNVM (they can read the key and recompute the MAC). For
+genuine tamper and rollback resistance, either enable
+`EXTRA_CFLAGS=-DMIV_SNVM_NV_AUTH` (the key page is then stored as authenticated-
+ciphertext under the on-die factory key) or provision a protected key from
+fuses/PUF with `EXTRA_CFLAGS=-DMIV_FWTPM_NV_KEY='{...}'`. The key is acquired
+fail-closed at boot: if it cannot be read the device refuses to run rather than
+serve NV unauthenticated. In authenticated mode a status-2 sNVM read is an
+authentication failure (not a blank page), so a tampered or unprovisioned page
+also fails closed; authenticated mode therefore expects its NV and key pages to be
+provisioned once before first use.
+
+Pages use non-authenticated plaintext mode by default. For a production TPM that
+needs confidentiality at rest, build with `EXTRA_CFLAGS=-DMIV_SNVM_NV_AUTH` to use
+the authenticated-ciphertext service, so each page (including the integrity-key
+page) is encrypted and integrity-checked with the on-die factory key plus a
+unique application key (`-DMIV_SNVM_USK='{...}'`, required - there is no built-in
+default). Authenticated mode additionally requires the FPGA design's security
+policy to permit authenticated sNVM writes (configured in the Libero Security
+Policy Manager); without that provisioning the System Controller rejects the
+write with `SNVM_WRITE_NOT_PERMITTED`, so it is off by default here.
+
+The mailbox and persistence failure paths (controller busy/timeout, blank-page
+handling, partial multi-page writes, a stalled UART frame) are exercised and
+validated on hardware rather than by mocked unit tests.
 
 Note the MT25Q SPI flash on this board is wired to the PolarFire dedicated
 System-Controller SPI (shared with the programming/SPI-boot path), not to

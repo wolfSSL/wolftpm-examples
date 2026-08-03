@@ -172,6 +172,7 @@ int miv_snvm_write_page(uint8_t page, const uint8_t* data)
 {
     /* Frame: [0]=SNVMADDR, [1..3]=reserved, [4..255]=252 data bytes. */
     uint32_t frame[256U / 4U];
+    int rc;
 
     if (data == NULL || page >= MIV_SNVM_PAGE_COUNT) {
         return -1;
@@ -180,8 +181,11 @@ int miv_snvm_write_page(uint8_t page, const uint8_t* data)
     ((uint8_t*)frame)[0] = page;
     memcpy((uint8_t*)frame + 4, data, MIV_SNVM_PAGE_DATA);
 
-    return miv_sysserv_exec(SS_CMD_SNVM_WRITE, (const uint8_t*)frame, 256U,
-                            NULL, 0U, 0U, 0U);
+    rc = miv_sysserv_exec(SS_CMD_SNVM_WRITE, (const uint8_t*)frame, 256U,
+                          NULL, 0U, 0U, 0U);
+    /* frame holds NV page bytes (may be secrets); scrub before returning. */
+    ForceZero(frame, sizeof(frame));
+    return rc;
 }
 
 int miv_snvm_read_page(uint8_t page, uint8_t* data)
@@ -207,6 +211,9 @@ int miv_snvm_read_page(uint8_t page, uint8_t* data)
     if (rc == 0) {
         memcpy(data, (uint8_t*)resp + 4, MIV_SNVM_PAGE_DATA);
     }
+    /* resp holds the returned NV page (may be secrets); scrub both buffers. */
+    ForceZero(resp, sizeof(resp));
+    ForceZero(frame, sizeof(frame));
     return rc;
 }
 
@@ -216,6 +223,7 @@ int miv_snvm_write_page_auth(uint8_t page, const uint8_t* data,
     /* Frame (252): [0]=SNVMADDR, [1..3]=reserved, [4..239]=236 data bytes,
      * [240..251]=12-byte user secret key. */
     uint32_t frame[252U / 4U];
+    int rc;
 
     if (data == NULL || usk == NULL || page >= MIV_SNVM_PAGE_COUNT) {
         return -1;
@@ -225,8 +233,11 @@ int miv_snvm_write_page_auth(uint8_t page, const uint8_t* data,
     memcpy((uint8_t*)frame + 4, data, MIV_SNVM_PAGE_DATA_AUTH);
     memcpy((uint8_t*)frame + 4 + MIV_SNVM_PAGE_DATA_AUTH, usk, MIV_SNVM_USK_LEN);
 
-    return miv_sysserv_exec(SS_CMD_SNVM_WRITE_C, (const uint8_t*)frame, 252U,
-                            NULL, 0U, 0U, 0U);
+    rc = miv_sysserv_exec(SS_CMD_SNVM_WRITE_C, (const uint8_t*)frame, 252U,
+                          NULL, 0U, 0U, 0U);
+    /* frame holds NV data plus the user secret key; scrub before returning. */
+    ForceZero(frame, sizeof(frame));
+    return rc;
 }
 
 int miv_snvm_read_page_auth(uint8_t page, uint8_t* data, const uint8_t* usk)
@@ -249,5 +260,8 @@ int miv_snvm_read_page_auth(uint8_t page, uint8_t* data, const uint8_t* usk)
     if (rc == 0) {
         memcpy(data, (uint8_t*)resp + 4, MIV_SNVM_PAGE_DATA_AUTH);
     }
+    /* frame holds the user secret key, resp the returned NV page; scrub both. */
+    ForceZero(resp, sizeof(resp));
+    ForceZero(frame, sizeof(frame));
     return rc;
 }

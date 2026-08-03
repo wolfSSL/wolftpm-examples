@@ -68,6 +68,12 @@ for the wolfCrypt tests or a bare-metal fwTPM.
   core reaches the System Controller internally (no SC interface to route). Tie
   the `FF_NONTIMED_ENTRY` / `FF_TIMED_ENTRY` inputs to GND (Libero errors on
   floating inputs even with Flash Freeze disabled); status outputs may float.
+- The default firmware stores NV in plaintext sNVM (with a device-derived
+  integrity key computed in firmware - no bitstream change). The optional
+  authenticated-ciphertext NV mode (`-DMIV_SNVM_NV_AUTH`, for confidentiality at
+  rest) is a bitstream-side concern: the design's Security Policy Manager must
+  permit authenticated sNVM writes, otherwise the System Controller rejects them
+  with `SNVM_WRITE_NOT_PERMITTED`.
 - Keep CoreTimer0 for timekeeping (this MIV_RV32 has no usable MTIME/mcycle).
 
 After building, export the final memory map and update `firmware/common/miv_board.h`

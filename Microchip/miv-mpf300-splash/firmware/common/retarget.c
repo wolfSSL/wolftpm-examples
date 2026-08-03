@@ -96,16 +96,21 @@ int _read(int fd, char* buf, int len)
 void* _sbrk(ptrdiff_t incr)
 {
     char* prev;
+    char* next;
 
     if (heap_ptr == NULL) {
         heap_ptr = end;
     }
-    if ((heap_ptr + incr) > _heap_end) {
+    /* Reject growth past the heap top and, since incr is signed, any negative
+     * increment that would rewind the cursor below the heap base into freed or
+     * still-live memory. */
+    next = heap_ptr + incr;
+    if (next < end || next > _heap_end) {
         errno = ENOMEM;
         return (void*)-1;
     }
     prev = heap_ptr;
-    heap_ptr += incr;
+    heap_ptr = next;
     return (void*)prev;
 }
 

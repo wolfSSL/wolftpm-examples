@@ -51,6 +51,9 @@ extern int miv_sysserv_nonce(unsigned char out[32]);
  * and power cycles, exercising the sNVM path independently of the TPM state. */
 #ifdef MIV_SNVM_BOOTCNT_TEST
 #define MIV_SNVM_BOOTCNT_PAGE   220U
+/* A never-written plaintext sNVM page reads back as status 2 (rc -102); any
+ * other negative rc is a genuine fault, not a blank page. */
+#define MIV_SNVM_RC_BLANK       (-102)
 
 static void FwTPM_SnvmBootCounter(void)
 {
@@ -60,11 +63,17 @@ static void FwTPM_SnvmBootCounter(void)
 
     memset(page, 0xFF, sizeof(page));  /* clean page for the blank-read case */
     rc = miv_snvm_read_page(MIV_SNVM_BOOTCNT_PAGE, page);
-    if (rc != 0) {
-        /* A never-written sNVM page returns an authentication failure in
-         * plaintext mode; treat that as the first boot (counter 0). */
+    if (rc == MIV_SNVM_RC_BLANK) {
+        /* Never-written page: treat that (and only that) as the first boot. */
         cnt = 0;
         printf("sNVM persistence: boot counter = 0 (page blank, first boot)\r\n");
+    }
+    else if (rc != 0) {
+        /* A genuine read fault: do NOT overwrite - resetting a good counter to a
+         * fresh value would destroy state. Report and leave the page untouched. */
+        printf("sNVM persistence: read FAILED rc=%d (leaving counter "
+               "untouched)\r\n", rc);
+        return;
     }
     else {
         cnt = (uint32_t)page[0] | ((uint32_t)page[1] << 8) |
@@ -102,6 +111,16 @@ static FWTPM_CTX g_ctx;
 #define MSSIM_SESSION_END       20
 #define MSSIM_STOP              21
 
+/* Once a frame has started, the rest of it must arrive within this window; on
+ * expiry the parser resets rather than blocking forever on a partial frame. */
+#define MIV_FWTPM_FRAME_TIMEOUT_MS   2000U
+
+/* Minimal well-formed TPM_RC_FAILURE response (10-byte header) used to unblock
+ * a raw-transport host after a malformed or stalled frame. */
+static const uint8_t g_tpmRcFailure[10] = {
+    0x80, 0x01, 0x00, 0x00, 0x00, 0x0A, 0x00, 0x00, 0x01, 0x01
+};
+
 /* ---- raw UART byte transport over CoreUARTapb ---- */
 static int UartRecv(uint8_t* buf, uint32_t sz)
 {
@@ -113,6 +132,27 @@ static int UartRecv(uint8_t* buf, uint32_t sz)
              * with the /128 prescaler) or idle time is dropped from the TPM
              * clock. This spin is the only thing running between commands. */
             (void)miv_ticks();
+        }
+    }
+    return 0;
+}
+
+/* Bounded receive for the remainder of an in-progress frame: like UartRecv but
+ * gives up with -1 if no byte arrives within timeoutMs (inter-byte deadline),
+ * so a sender that stops mid-frame cannot wedge the command loop. Used only
+ * after a frame has started; the idle wait for a new command still blocks. */
+static int UartRecvTO(uint8_t* buf, uint32_t sz, uint32_t timeoutMs)
+{
+    uint32_t i;
+    uint64_t deadline;
+
+    for (i = 0; i < sz; i++) {
+        deadline = miv_millis() + timeoutMs;
+        while (miv_uart_getc(MIV_COREUARTAPB0_BASE, &buf[i]) == 0) {
+            (void)miv_ticks();
+            if (miv_millis() >= deadline) {
+                return -1;
+            }
         }
     }
     return 0;
@@ -225,26 +265,27 @@ static void FwTPM_UartCommandLoop(FWTPM_CTX* ctx)
         tag = ((uint16_t)hdr[0] << 8) | (uint16_t)hdr[1];
         if (tag == 0x8001 || tag == 0x8002) {
             memcpy(ctx->cmdBuf, hdr, 4);
-            if (UartRecv(ctx->cmdBuf + 4, 6) != 0) {
+            if (UartRecvTO(ctx->cmdBuf + 4, 6, MIV_FWTPM_FRAME_TIMEOUT_MS) != 0) {
+                /* Header stalled mid-frame: unblock a waiting host and reset. */
+                UartSend(g_tpmRcFailure, sizeof(g_tpmRcFailure));
                 continue;
             }
             cmdSize = LoadU32BE(ctx->cmdBuf + 2);
             if (cmdSize < 10 || cmdSize > FWTPM_MAX_COMMAND_SIZE) {
-                static const uint8_t errRsp[10] = {
-                    0x80, 0x01, 0x00, 0x00, 0x00, 0x0A,
-                    0x00, 0x00, 0x01, 0x01 /* TPM_RC_FAILURE */
-                };
                 /* Drain any announced payload (bounded, idle-terminated) so a
                  * malformed frame cannot leave the raw transport misaligned. */
                 if (cmdSize > 10U) {
                     UartDrain(cmdSize - 10U);
                 }
-                UartSend(errRsp, sizeof(errRsp));
+                UartSend(g_tpmRcFailure, sizeof(g_tpmRcFailure));
                 continue;
             }
             remaining = cmdSize - 10;
             if (remaining > 0) {
-                if (UartRecv(ctx->cmdBuf + 10, remaining) != 0) {
+                if (UartRecvTO(ctx->cmdBuf + 10, remaining,
+                               MIV_FWTPM_FRAME_TIMEOUT_MS) != 0) {
+                    /* Payload stalled mid-frame: unblock and reset. */
+                    UartSend(g_tpmRcFailure, sizeof(g_tpmRcFailure));
                     continue;
                 }
             }
@@ -257,11 +298,7 @@ static void FwTPM_UartCommandLoop(FWTPM_CTX* ctx)
             else {
                 /* No response produced: emit a well-formed TPM_RC_FAILURE so the
                  * host does not block in read_exact(). */
-                static const uint8_t failRsp[10] = {
-                    0x80, 0x01, 0x00, 0x00, 0x00, 0x0A,
-                    0x00, 0x00, 0x01, 0x01
-                };
-                UartSend(failRsp, sizeof(failRsp));
+                UartSend(g_tpmRcFailure, sizeof(g_tpmRcFailure));
             }
             continue;
         }
@@ -297,10 +334,18 @@ static void FwTPM_UartCommandLoop(FWTPM_CTX* ctx)
         }
 
         /* SEND_COMMAND: locality(1) + cmdSize(4) + payload */
-        if (UartRecv(&locality, 1) != 0) {
+        if (UartRecvTO(&locality, 1, MIV_FWTPM_FRAME_TIMEOUT_MS) != 0) {
+            /* Frame stalled: return an empty response so the host does not
+             * block waiting on the mssim reply, then reset the parser. */
+            StoreU32BE(rspHdr, 0);
+            UartSend(rspHdr, 4);
+            UartSendAck();
             continue;
         }
-        if (UartRecv(hdr, 4) != 0) {
+        if (UartRecvTO(hdr, 4, MIV_FWTPM_FRAME_TIMEOUT_MS) != 0) {
+            StoreU32BE(rspHdr, 0);
+            UartSend(rspHdr, 4);
+            UartSendAck();
             continue;
         }
         cmdSize = LoadU32BE(hdr);
@@ -315,7 +360,7 @@ static void FwTPM_UartCommandLoop(FWTPM_CTX* ctx)
             UartSendAck();
             continue;
         }
-        if (UartRecv(ctx->cmdBuf, cmdSize) != 0) {
+        if (UartRecvTO(ctx->cmdBuf, cmdSize, MIV_FWTPM_FRAME_TIMEOUT_MS) != 0) {
             StoreU32BE(rspHdr, 0);
             UartSend(rspHdr, 4);
             UartSendAck();

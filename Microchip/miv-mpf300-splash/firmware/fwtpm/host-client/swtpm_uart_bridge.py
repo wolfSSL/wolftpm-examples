@@ -21,6 +21,17 @@ import serial
 DEV  = sys.argv[1] if len(sys.argv) > 1 else "/dev/ttyUSB0"
 PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 2321
 
+# Reject frames larger than the device command buffer (FWTPM_MAX_COMMAND_SIZE,
+# with headroom) so a bogus 32-bit size cannot make the single-threaded bridge
+# block on a body read that never completes.
+MAX_CMD  = 8192
+# Also bound the device-announced response size, so a malfunctioning device
+# cannot make the bridge block on a serial read that never completes.
+MAX_RSP  = 8192
+# Once a frame has started, bound how long to wait for the rest of it; an
+# incomplete frame then closes the connection instead of blocking forever.
+FRAME_TO = 60
+
 # mssim platform command codes
 SEND_COMMAND = 8
 POWER_ON     = 1
@@ -81,10 +92,12 @@ while True:
     conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     try:
         while True:
+            conn.settimeout(None)              # block for the next command
             hdr = sock_read(conn, 4)
             if hdr is None:
                 break
             cmd = struct.unpack(">I", hdr)[0]
+            conn.settimeout(FRAME_TO)          # bound the rest of this frame
 
             if cmd == SEND_COMMAND:
                 loc = sock_read(conn, 1)
@@ -92,6 +105,10 @@ while True:
                 if loc is None or szb is None:
                     break                      # client disconnected mid-frame
                 sz = struct.unpack(">I", szb)[0]
+                if sz < 10 or sz > MAX_CMD:
+                    print("reject frame with bad size %d (max %d)"
+                          % (sz, MAX_CMD), flush=True)
+                    break
                 body = sock_read(conn, sz)
                 if body is None:
                     break
@@ -102,6 +119,10 @@ while True:
                 ser.flush()
                 rspb = ser_read(4)
                 rsp_sz = struct.unpack(">I", rspb)[0]
+                if rsp_sz > MAX_RSP:
+                    print("device announced oversize response %d (max %d)"
+                          % (rsp_sz, MAX_RSP), flush=True)
+                    break
                 rsp = ser_read(rsp_sz) if rsp_sz else b""
                 ack = ser_read(4)
                 rc = struct.unpack(">I", rsp[6:10])[0] if rsp_sz >= 10 else 0xFFFFFFFF
