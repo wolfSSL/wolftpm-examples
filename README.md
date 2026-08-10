@@ -45,9 +45,15 @@ hart of the PolarFire SoC (MPFS250T Video Kit), split from Linux by HSS
 AMP partitioning (Linux on harts 1-3, fTPM on hart 4). Linux observes the
 fTPM over a shared-memory mailbox + console ring (non-cached DDR) via
 `/dev/mem`; the hart runs real TPM 2.0 commands (TPM2_GetCapability,
-TPM2_GetRandom from the System Controller TRNG) read live from Linux.
+TPM2_GetRandom seeded from the System Controller nonce service) read live from Linux.
 
 Added in https://github.com/wolfSSL/wolftpm-examples/pull/2
+
+## Microchip PolarFire MPF300 Splash Kit fwTPM on a Mi-V RV32 soft core
+
+See [Microchip/miv-mpf300-splash](Microchip/miv-mpf300-splash).
+
+Firmware TPM 2.0 on a soft MIV_RV32 RISC-V core instantiated in the fabric of a PolarFire MPF300 Splash Kit (a pure FPGA, no hardened CPU). Built and verified on hardware in stages: a CoreUARTapb hello-world with LED heartbeat, wolfCrypt test/benchmark from 512 KB LSRAM, and the fwTPM driven over UART, seeding its Hash-DRBG from the PolarFire System Controller nonce service (NRBG output) and with persistent NV in the on-die secure NVM (sNVM) - both reached through a single CoreSysServices_PF block. Distinct from the PolarFire SoC (MPFS250T) port above, which runs on a hardened U54 hart.
 
 ## Xilinx UltraScale+ MPSoC with FreeRTOS, LWIP with wolfSSL/wolfTPM
 
