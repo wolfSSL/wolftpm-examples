@@ -100,10 +100,13 @@ extern "C" {
 #define WOLFSSL_SHA512
 #define HAVE_HKDF
 
-/* ---- RNG: Hash-DRBG seeded from a real hardware TRNG ----
- * Seed material comes from the PolarFire System Controller NRBG via the
- * CoreSysServices_PF nonce service (see fwtpm_rng_sysserv.c). wolfCrypt's
- * Hash-DRBG expands it and reseeds from the NRBG every WC_RESEED_INTERVAL. */
+/* ---- RNG: Hash-DRBG seeded from the System Controller Nonce Service ----
+ * Seed material comes from the PolarFire System Controller NRBG (nonce
+ * service, opcode 0x21) via the CoreSysServices_PF mailbox (see
+ * fwtpm_rng_sysserv.c). wolfCrypt's Hash-DRBG expands it and reseeds from the
+ * nonce service every WC_RESEED_INTERVAL. On the non-S MPF300T this NRBG is an
+ * SRAM-PUF-seeded iRNG (not SP800-90A/B certified); it is used only as seed for
+ * the SP800-90A Hash-DRBG, which produces the TPM's random stream. */
 #define HAVE_HASHDRBG
 #define WC_RESEED_INTERVAL          (1000000)
 #define NO_OLD_RNGNAME

@@ -424,14 +424,14 @@ int main(void)
      * (CoreSysServices_PF). This is the seed source behind the Hash-DRBG. */
     nrc = miv_sysserv_nonce(nonce);
     if (nrc == 0) {
-        printf("TRNG: System Controller nonce OK: ");
+        printf("Entropy: System Controller nonce OK: ");
         for (i = 0; i < 8; i++) {
             printf("%02x", nonce[i]);
         }
         printf("...\r\n");
     }
     else {
-        printf("TRNG: nonce service FAILED rc=%d "
+        printf("Entropy: nonce service FAILED rc=%d "
                "(check CoreSysServices_PF on APB 0x70003000)\r\n", nrc);
     }
     /* Scrub the raw nonce. ForceZero is not linkable in this translation unit

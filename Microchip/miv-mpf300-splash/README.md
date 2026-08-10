@@ -6,7 +6,7 @@ The example is built up in independently verifiable stages, all running and veri
 
 - **Hello-world** (`firmware/hello/`): a CoreUARTapb banner and LED heartbeat, proving the soft-core platform.
 - **wolfCrypt** (`firmware/wolfcrypt-test/`): `wolfcrypt_test` and `benchmark` from 512 KB LSRAM, covering the algorithm families the fwTPM uses (RSA, ECC, AES, SHA-2/3, HMAC, CMAC) plus post-quantum ML-DSA / ML-KEM, with a performance pass. It is a perf/coverage benchmark, not a bit-exact mirror of the fwTPM config (see `wolfcrypt-test/user_settings.h`).
-- **fwTPM** (`firmware/fwtpm/`): a TPM 2.0 server driven over UART, with a hardware TRNG (the PolarFire System Controller NRBG seeding wolfCrypt's Hash-DRBG) and persistent NV in on-die secure NVM (sNVM) - both reached through one `CoreSysServices_PF` block.
+- **fwTPM** (`firmware/fwtpm/`): a TPM 2.0 server driven over UART, seeding wolfCrypt's Hash-DRBG from the PolarFire System Controller Nonce Service (NRBG output), with persistent NV in on-die secure NVM (sNVM) - both reached through one `CoreSysServices_PF` block.
 
 ## wolfCrypt on the Mi-V
 
@@ -183,31 +183,41 @@ TPM2_PCR_Read PCR0      rc=0  (PCR0 = all-zero SHA-256, initial state)
 TPM2_GetRandom 16       74f0aa3afc761b30075d608af95d3e88
 ```
 
-### Hardware TRNG (entropy)
+### Entropy source (System Controller Nonce Service)
 
-The TPM's randomness is seeded from a real hardware entropy source: the
-PolarFire System Controller's non-deterministic RNG (NRBG),
-reached from the fabric through a **`CoreSysServices_PF`** block on APB slot 3
-(`0x70003000`). Its **nonce service** returns 32 bytes of hardware entropy, which
+The TPM's randomness is seeded from the PolarFire System Controller **Nonce
+Service** (NRBG output), reached from the fabric through a
+**`CoreSysServices_PF`** block on APB slot 3 (`0x70003000`). The Nonce Service
+returns 32 bytes of hardware entropy, which
 `firmware/fwtpm/fwtpm_rng_sysserv.c` feeds to wolfCrypt's Hash-DRBG as seed
 material (`CUSTOM_RAND_GENERATE_SEED`); the DRBG then produces the TPM's random
-stream and reseeds from the NRBG on schedule.
+stream and reseeds from the Nonce Service on schedule.
 
 Verified on hardware - the boot self-test reports the live nonce, and the seed
 is non-deterministic across resets (two cold boots):
 
 ```
-TRNG: System Controller nonce OK: 544b0d99f59f6f89...   (boot 1)
-TRNG: System Controller nonce OK: a2eed7bc639418cc...   (boot 2)
+Entropy: System Controller nonce OK: 544b0d99f59f6f89...   (boot 1)
+Entropy: System Controller nonce OK: a2eed7bc639418cc...   (boot 2)
 TPM2_GetRandom 16      7DFE2E2E511F802B7E705D0E18816CED  (boot 1)
 TPM2_GetRandom 16      7FE637F2CE629985714059F6CACB6EF8  (boot 2)
 ```
+
+**Part-variant note on the entropy source.** The Splash Kit uses the non-S
+**MPF300T**, whose Nonce Service NRBG is an iRNG seeded from the SRAM-PUF. Its
+entropy is believed good, but it is **not SP800-90A/B certified** and no entropy
+characterization data is available for it. The security-enabled **MPF300TS**
+("-S") variant instead has a certified TRNG. In this example the nonce is used
+only as **seed** material for wolfCrypt's SP800-90A Hash-DRBG - the DRBG, not the
+raw Nonce Service, produces all TPM randomness and reseeds on schedule - so the
+raw source's lack of certification is mitigated by the certified-design DRBG in
+front of it.
 
 ### Persistent NV in on-die sNVM
 
 TPM NV is persistent, using the PolarFire
 **secure NVM (sNVM)** - on-die non-volatile storage reached through the same
-`CoreSysServices_PF` mailbox as the TRNG (`SYS_secure_nvm_write`/`read` System
+`CoreSysServices_PF` mailbox as the Nonce Service (`SYS_secure_nvm_write`/`read` System
 Services). No extra FPGA IP, pins, or bitstream change is needed: NV is
 firmware-only and rides the same bitstream.
 
@@ -339,7 +349,7 @@ Reference design memory map (see `firmware/common/miv_board.h`):
 | CoreUARTapb0 | `0x70000000` | Console, 115200 8N1 |
 | CoreGPIO (out) | `0x70001000` | LEDs on GPIO_0..3 |
 | CoreTimer0 | `0x70002000` | Time base (see note) |
-| CoreSysServices_PF | `0x70003000` | System Controller services; NRBG nonce = TRNG (APB slot 3) |
+| CoreSysServices_PF | `0x70003000` | System Controller services; Nonce Service (NRBG entropy seed) (APB slot 3) |
 
 If your Libero design differs, override the defaults in `miv_board.h` (or via `-D` in the Makefile) and the linker `ORIGIN`/`LENGTH`.
 
@@ -353,7 +363,7 @@ firmware/
               CoreTimer clock/delays, RV32 startup, newlib retarget (printf)
   hello/      banner + LED heartbeat
   wolfcrypt-test/  wolfcrypt_test + benchmark_test wrapper
-  fwtpm/      fwTPM server over UART + System-Controller TRNG +
+  fwtpm/      fwTPM server over UART + System-Controller Nonce Service entropy +
               persistent sNVM NV; host-client/ drives it from a PC
 fpga/         How to build/program the Mi-V soft-core platform
 ```
@@ -416,11 +426,11 @@ PASS) followed by the `benchmark_test` table.
 
 ```
 cd firmware/fwtpm
-make                       # default: plaintext sNVM NV, TRNG, no boot-counter
+make                       # default: plaintext sNVM NV, Nonce Service entropy, no boot-counter
 ```
 
-JTAG-load `miv-fwtpm.elf`. The banner reports the NV backend and a live TRNG
-nonce, the self-test runs `TPM2_Startup` + `TPM2_GetRandom`, and the device then
+JTAG-load `miv-fwtpm.elf`. The banner reports the NV backend and a live Nonce
+Service seed, the self-test runs `TPM2_Startup` + `TPM2_GetRandom`, and the device then
 serves TPM 2.0 over the UART. Drive it from the PC with the host clients:
 
 ```

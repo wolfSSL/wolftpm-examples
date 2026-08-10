@@ -1,8 +1,8 @@
 /* miv_sysserv.h
  *
  * PolarFire System Controller services reached from the Mi-V fabric through the
- * CoreSysServices_PF APB peripheral (mailbox). Shared by the fwTPM TRNG (nonce
- * service) and the persistent NV backend (secure NVM / sNVM read+write).
+ * CoreSysServices_PF APB peripheral (mailbox). Shared by the fwTPM entropy seed
+ * (nonce service) and the persistent NV backend (secure NVM / sNVM read+write).
  *
  * Independent implementation from the CoreSysServices_PF handbook register map;
  * does not reuse Microchip's driver sources.

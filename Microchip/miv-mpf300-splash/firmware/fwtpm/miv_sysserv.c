@@ -2,7 +2,7 @@
  *
  * PolarFire System Controller service driver for the Mi-V fabric, over the
  * CoreSysServices_PF APB mailbox. Provides the generic mailbox executor plus
- * the nonce (TRNG seed) and sNVM (persistent NV) services used by the fwTPM.
+ * the nonce (DRBG seed) and sNVM (persistent NV) services used by the fwTPM.
  *
  * Register map and service framing are from the CoreSysServices_PF handbook;
  * this is an independent implementation, not Microchip's driver sources.

@@ -60,7 +60,7 @@ for the wolfCrypt tests or a bare-metal fwTPM.
 - **CoreSysServices_PF** on a free CoreAPB3 slave slot (slot 3, base
   `0x70003000`), with only the **Nonce Service** enabled. This one block
   provides *both* fwTPM needs through the System Controller mailbox: the
-  hardware TRNG (nonce service, backed by the on-die NRBG) and persistent NV
+  hardware entropy from the System Controller Nonce Service (on-die NRBG) and persistent NV
   (secure-NVM read/write System Services). No `CoreSPI`/external flash is needed
   - the on-board MT25Q is wired to the shared dedicated System-Controller SPI,
   not to fabric pins, so NV lives in on-die sNVM instead.
