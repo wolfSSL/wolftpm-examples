@@ -1,0 +1,16 @@
+# Build artifacts
+build/
+*.o
+*.d
+*.elf
+*.hex
+*.bin
+*.lst
+*.map
+
+# Local-only notes / draft scratch (never committed)
+*.local.md
+
+# Python
+__pycache__/
+*.pyc
