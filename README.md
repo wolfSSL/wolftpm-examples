@@ -36,6 +36,17 @@ Firmware TPM 2.0 running bare-metal on the Zynq UltraScale+ MPSoC R5 RPU
 in lock-step mode. PetaLinux on the A53 APU acts as TPM client over
 OpenAMP RPMsg via Linux remoteproc. Persistent NV in QSPI flash.
 
+## AMD Zynq-7000 fwTPM on Cortex-A9 with SRAM PUF
+
+See [Xilinx/fwtpm-zc702-a9](Xilinx/fwtpm-zc702-a9).
+
+Firmware TPM 2.0 running bare-metal on a single Cortex-A9 of an AMD/Xilinx
+Zynq-7000 (ZC702), served to a host over UART with the raw swtpm/mssim framing.
+The TPM's NV-journal integrity key is a device-unique key derived from the
+Cortex-A9 on-chip-memory (OCM) SRAM power-on state via wolfCrypt's SRAM PUF
+(BCH fuzzy extractor + HKDF) - no root key is stored in flash. Entropy is
+wolfCrypt MemUse (the Zynq-7000 PS has no hardware TRNG).
+
 ## Microchip PolarFire SoC fwTPM on a RISC-V hart (AMP)
 
 See [Microchip/fwtpm-polarfire-miv](Microchip/fwtpm-polarfire-miv).
