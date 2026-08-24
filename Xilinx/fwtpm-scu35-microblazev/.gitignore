@@ -1,0 +1,27 @@
+# Build artifacts
+build/
+*.o
+*.d
+*.elf
+*.hex
+*.bin
+*.lst
+*.map
+
+# Local FPGA project / bitstreams (not redistributed)
+fpga/*/
+*.pdi
+*.xsa
+*.bit
+
+# Vivado run logs / journals (can land in any dir the tool is invoked from)
+vivado*.log
+vivado*.jou
+.Xil/
+
+# Local-only notes
+*.local.md
+
+# Python
+__pycache__/
+*.pyc

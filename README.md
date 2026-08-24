@@ -47,6 +47,21 @@ Cortex-A9 on-chip-memory (OCM) SRAM power-on state via wolfCrypt's SRAM PUF
 (BCH fuzzy extractor + HKDF) - no root key is stored in flash. Entropy is
 wolfCrypt MemUse (the Zynq-7000 PS has no hardware TRNG).
 
+## AMD Spartan UltraScale+ SCU35 fwTPM on a MicroBlaze V soft core
+
+See [Xilinx/fwtpm-scu35-microblazev](Xilinx/fwtpm-scu35-microblazev).
+
+Firmware TPM 2.0 on a MicroBlaze V (RISC-V rv32imc) soft core in the fabric of an
+AMD Spartan UltraScale+ SCU35 Evaluation Kit (`xcsu35p`, a pure FPGA), served over
+UART with the raw swtpm/mssim framing - the AMD analog of the PolarFire Mi-V
+example. The full RSA+ECC fwTPM is ~652 KB and needs a larger device, but a
+minimal ECC-only build (`FWTPM_TINY_ECC`) fits the stock 192 KB of block RAM
+(no DDR on this part): ~190 KB via wolfTPM's per-command-group gates (the
+individual `FWTPM_NO_*` macros, selected explicitly in `user_settings.h`) and an
+on-die SYSMONE4 fabric TRNG (added by `fpga/add_sysmon.tcl`) in place of MemUse
+entropy. Hardware-validated on the SCU35 - TPM2_Startup and TPM2_GetRandom pass and
+GetRandom differs across cold boots, confirming real System-Monitor entropy.
+
 ## Microchip PolarFire SoC fwTPM on a RISC-V hart (AMP)
 
 See [Microchip/fwtpm-polarfire-miv](Microchip/fwtpm-polarfire-miv).
