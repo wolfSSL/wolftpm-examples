@@ -1,7 +1,8 @@
 /* fwtpm_puf.c
  *
  * wolfCrypt SRAM PUF integration for the Zynq-7000 fwTPM. Uses the power-on
- * state of a carve-out of the Cortex-A9 on-chip memory (OCM) as the PUF source.
+ * state of a carve-out of uninitialized DDR as the PUF source. NOT on-chip
+ * memory: the Zynq-7000 BootROM clears OCM before any user code runs.
  * On first boot it enrolls (generating helper data + a device identity); on
  * later boots it reconstructs the same stable bits from the persisted helper
  * data, correcting the SRAM's power-on noise. From the reconstructed stable
@@ -45,12 +46,25 @@
 #include "zynq7000.h"
 #include "fwtpm_puf.h"
 
-/* OCM PUF source address. A carve-out near the top of the 256 KB OCM (mapped
- * high after the SLCR OCM_CFG remap) that the FSBL does not use, so its
- * power-on SRAM state survives to the first read here. Override for a board
- * whose FSBL clears this region. Must provide at least WC_PUF_RAW_BYTES. */
-#ifndef FWTPM_PUF_OCM_ADDR
-#define FWTPM_PUF_OCM_ADDR   (ZYNQ_OCM_HIGH_BASE + 0x3F000UL)
+/* PUF source address: an untouched DDR carve-out well above the firmware's own
+ * link address, read before anything writes it.
+ *
+ * NOT OCM. The Zynq-7000 BootROM clears the whole on-chip memory before any
+ * user code runs, so every OCM address reads back as zeros after a cold power
+ * cycle and wc_PufReadSram() rejects it with PUF_READ_E. Measured on a ZC702:
+ * all readable OCM regions were 0 percent ones after a genuine power cycle.
+ *
+ * DDR is left alone: ps7_init brings the controller up but never scrubs the
+ * array, so the power-up state of the DRAM cells survives. Measured on a ZC702
+ * across two independent cold power cycles: about 30 to 36 percent ones, and
+ * only 1.7 to 1.8 percent of bits differed between boots - well inside the
+ * BCH(127, k, t=10) budget of 10 flips per 127-bit codeword.
+ *
+ * Because this is a DRAM rather than an SRAM source, the readout is biased
+ * toward zero; see WC_PUF_HW_MIN_PCT in user_settings.h. Must provide at least
+ * WC_PUF_RAW_BYTES, and must not overlap the firmware, its heap or its stack. */
+#ifndef FWTPM_PUF_SRC_ADDR
+#define FWTPM_PUF_SRC_ADDR   0x20000000UL
 #endif
 
 /* HKDF context/info string binding the derived key to this use. */
@@ -95,11 +109,37 @@ int fwtpm_puf_helper_store(const unsigned char* helper, unsigned int helperSz,
     return 0;    /* no-op (volatile) */
 }
 
-int FwTPM_Puf_Init(int* enrolled)
+/* Invalidate the D-cache over the PUF source before it is read.
+ *
+ * The DDR window is mapped Normal write-back cacheable (see common/mmu.c), so
+ * unlike the old OCM carve-out a read here could be served from a cache line
+ * rather than from the DRAM array. In the current boot flow the first touch is
+ * always a miss, so this is a no-op in practice - but the PUF depends on
+ * reading the physical power-on state, and that must not be left to depend on
+ * nothing else having touched the region first.
+ *
+ * A plain invalidate (no clean) is correct: nothing writes this region, so
+ * there are no dirty lines to discard. The Cortex-A9 cache line is 32 bytes. */
+static void FwTPM_Puf_InvalidateSource(const void* addr, unsigned int len)
+{
+    uintptr_t p   = (uintptr_t)addr & ~(uintptr_t)31;
+    uintptr_t end = (uintptr_t)addr + len;
+
+    __asm__ volatile("dsb" ::: "memory");
+    for (; p < end; p += 32) {
+        /* DCIMVAC: invalidate data cache line by MVA to PoC */
+        __asm__ volatile("mcr p15, 0, %0, c7, c6, 1" : : "r"(p) : "memory");
+    }
+    __asm__ volatile("dsb" ::: "memory");
+    __asm__ volatile("isb" ::: "memory");
+}
+
+int FwTPM_Puf_InitEx(int forceEnroll, int* enrolled)
 {
     wc_PufCtx ctx;
     unsigned char helper[WC_PUF_HELPER_BYTES];
     unsigned int  profileId = 0;
+    int haveHelper;
     int didEnroll = 0;
     int ret;
 
@@ -110,8 +150,10 @@ int FwTPM_Puf_Init(int* enrolled)
         return ret;
     }
 
-    /* Read the raw OCM power-on state into the PUF context. */
-    ret = wc_PufReadSram(&ctx, (const byte*)(uintptr_t)FWTPM_PUF_OCM_ADDR,
+    /* Read the raw DDR power-on state into the PUF context. */
+    FwTPM_Puf_InvalidateSource((const void*)(uintptr_t)FWTPM_PUF_SRC_ADDR,
+        (unsigned int)WC_PUF_RAW_BYTES);
+    ret = wc_PufReadSram(&ctx, (const byte*)(uintptr_t)FWTPM_PUF_SRC_ADDR,
         WC_PUF_RAW_BYTES);
     if (ret != 0) {
         wc_PufZeroize(&ctx);
@@ -119,9 +161,24 @@ int FwTPM_Puf_Init(int* enrolled)
     }
 
     /* Reconstruct from persisted helper data if present and the profile matches;
-     * otherwise enroll this boot and persist the new helper data. */
-    if (fwtpm_puf_helper_load(helper, (unsigned int)WC_PUF_HELPER_BYTES,
-            &profileId) == 0) {
+     * otherwise enroll this boot and persist the new helper data.
+     *
+     * A failed reconstruct is deliberately NOT retried as an enrollment: that
+     * would paper over a genuine PUF failure (wrong source region, a readout
+     * taken too late, a failing part) by minting a fresh device key. Re-enroll
+     * is a deliberate provisioning action, so it needs an explicit request:
+     * forceEnroll ignores any stored helper data and enrolls this boot
+     * (FwTPM_Puf_Init sets it from the FWTPM_PUF_FORCE_ENROLL build flag).
+     * Use it when the PUF source or profile changes, then rebuild without it. */
+    if (forceEnroll) {
+        haveHelper = 0;
+    }
+    else {
+        haveHelper = (fwtpm_puf_helper_load(helper,
+            (unsigned int)WC_PUF_HELPER_BYTES, &profileId) == 0);
+    }
+
+    if (haveHelper) {
         ret = wc_PufReconstructEx(&ctx, helper, WC_PUF_HELPER_BYTES, profileId);
     }
     else {
@@ -130,7 +187,12 @@ int FwTPM_Puf_Init(int* enrolled)
             ret = wc_PufGetHelperData(&ctx, helper, WC_PUF_HELPER_BYTES);
         }
         if (ret == 0) {
-            (void)fwtpm_puf_helper_store(helper, (unsigned int)WC_PUF_HELPER_BYTES,
+            /* The store must succeed before the new key is accepted: a forced
+             * enrollment that fails to persist its helper data would leave
+             * flash holding old or partial helper data that cannot reproduce
+             * this key, silently orphaning the NV journal it protects. */
+            ret = fwtpm_puf_helper_store(helper,
+                (unsigned int)WC_PUF_HELPER_BYTES,
                 (unsigned int)WC_PUF_PROFILE_ID);
         }
         didEnroll = 1;
@@ -162,6 +224,15 @@ int FwTPM_Puf_Init(int* enrolled)
     return 0;
 }
 
+int FwTPM_Puf_Init(int* enrolled)
+{
+#ifdef FWTPM_PUF_FORCE_ENROLL
+    return FwTPM_Puf_InitEx(1, enrolled);
+#else
+    return FwTPM_Puf_InitEx(0, enrolled);
+#endif
+}
+
 int FwTPM_Puf_GetIntegrityKey(void* halCtx, unsigned char* key,
     unsigned int* keySz)
 {
@@ -178,8 +249,8 @@ void FwTPM_Puf_PrintInfo(int enrolled)
 {
     int i;
 
-    printf("SRAM PUF: source OCM 0x%08lX, profile t=%d cw=%d id=0x%08lX (%s)\r\n",
-        (unsigned long)FWTPM_PUF_OCM_ADDR, (int)WC_PUF_BCH_T,
+    printf("SRAM PUF: source DDR 0x%08lX, profile t=%d cw=%d id=0x%08lX (%s)\r\n",
+        (unsigned long)FWTPM_PUF_SRC_ADDR, (int)WC_PUF_BCH_T,
         (int)WC_PUF_NUM_CODEWORDS, (unsigned long)WC_PUF_PROFILE_ID,
         enrolled ? "enrolled" : "reconstructed");
     printf("SRAM PUF: device identity ");

@@ -81,6 +81,104 @@ static void puf_scrub(void* p, unsigned int n)
     }
 }
 
+#ifndef FWTPM_NV_QSPI
+/* Controllable RAM helper-data backend for the FwTPM_Puf_Init integration
+ * steps below. These strong definitions override the weak no-op defaults in
+ * fwtpm_puf.c (the QSPI NV backend provides its own, so this section is
+ * excluded from -DFWTPM_NV_QSPI builds). */
+static unsigned char st_helper[WC_PUF_HELPER_BYTES];
+static unsigned int  st_profileId = 0;
+static int st_haveHelper = 0;
+static int st_failStore  = 0;
+static int st_storeCount = 0;
+
+int fwtpm_puf_helper_load(unsigned char* helper, unsigned int helperSz,
+    unsigned int* profileId)
+{
+    if (helper == NULL || profileId == NULL || !st_haveHelper ||
+            helperSz != sizeof(st_helper)) {
+        return -1;
+    }
+    memcpy(helper, st_helper, helperSz);
+    *profileId = st_profileId;
+    return 0;
+}
+
+int fwtpm_puf_helper_store(const unsigned char* helper, unsigned int helperSz,
+    unsigned int profileId)
+{
+    st_storeCount++;
+    if (st_failStore) {
+        return -1;
+    }
+    if (helper == NULL || helperSz != sizeof(st_helper)) {
+        return -1;
+    }
+    memcpy(st_helper, helper, helperSz);
+    st_profileId = profileId;
+    st_haveHelper = 1;
+    return 0;
+}
+
+/* Integration regression over FwTPM_Puf_Init/InitEx and helper persistence:
+ * first boot enrolls and stores, a later boot reconstructs the same key,
+ * forced enrollment overrides an existing helper and still reproduces the
+ * key, and a failing helper store must fail the (forced) enrollment rather
+ * than accept a key that cannot be reconstructed. Returns 0 on PASS. */
+static int puf_init_integration(void)
+{
+    unsigned char keyA[WC_PUF_KEY_SZ], keyB[WC_PUF_KEY_SZ];
+    unsigned int keySz;
+    int enrolled, ret;
+
+    st_haveHelper = 0;
+    st_failStore  = 0;
+    st_storeCount = 0;
+
+    /* First boot: no stored helper -> enroll + store. */
+    ret = FwTPM_Puf_InitEx(0, &enrolled);
+    step("init: first boot enrolls and stores helper",
+        ret == 0 && enrolled == 1 && st_haveHelper == 1);
+    if (ret != 0 || enrolled != 1 || st_haveHelper != 1) return -1;
+    keySz = sizeof(keyA);
+    if (FwTPM_Puf_GetIntegrityKey(NULL, keyA, &keySz) != 0) return -1;
+
+    /* Later boot: reconstruct from the stored helper, same key. */
+    ret = FwTPM_Puf_InitEx(0, &enrolled);
+    keySz = sizeof(keyB);
+    if (ret == 0) ret = FwTPM_Puf_GetIntegrityKey(NULL, keyB, &keySz);
+    step("init: reconstruct from stored helper, key matches",
+        ret == 0 && enrolled == 0 &&
+        memcmp(keyA, keyB, sizeof(keyA)) == 0);
+    if (ret != 0 || enrolled != 0 ||
+            memcmp(keyA, keyB, sizeof(keyA)) != 0) return -1;
+
+    /* Forced enrollment: overrides the existing helper (store runs again)
+     * and, from the same readout, reproduces the same key. */
+    ret = FwTPM_Puf_InitEx(1, &enrolled);
+    keySz = sizeof(keyB);
+    if (ret == 0) ret = FwTPM_Puf_GetIntegrityKey(NULL, keyB, &keySz);
+    step("init: forced enrollment overrides stored helper",
+        ret == 0 && enrolled == 1 && st_storeCount == 2 &&
+        memcmp(keyA, keyB, sizeof(keyA)) == 0);
+    if (ret != 0 || enrolled != 1 || st_storeCount != 2 ||
+            memcmp(keyA, keyB, sizeof(keyA)) != 0) return -1;
+
+    /* Failing helper store: the enrollment must fail, not hand out a key
+     * whose helper data was never durably persisted. */
+    st_failStore = 1;
+    ret = FwTPM_Puf_InitEx(1, &enrolled);
+    st_failStore = 0;
+    step("init: failed helper store fails the enrollment", ret != 0);
+    if (ret == 0) return -1;
+
+    puf_scrub(keyA, sizeof(keyA));
+    puf_scrub(keyB, sizeof(keyB));
+    st_haveHelper = 0;
+    return 0;
+}
+#endif /* !FWTPM_NV_QSPI */
+
 int FwTPM_Puf_SelfTest(void)
 {
     wc_PufCtx ctx;
@@ -180,6 +278,11 @@ int FwTPM_Puf_SelfTest(void)
 
     puf_scrub(key1, sizeof(key1));
     puf_scrub(key2, sizeof(key2));
+
+#ifndef FWTPM_NV_QSPI
+    if ((ret = puf_init_integration()) != 0) goto fail;
+#endif
+
     printf("Result: 0 (PASS)\r\n");
     return 0;
 
