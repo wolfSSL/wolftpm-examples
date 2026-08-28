@@ -5,9 +5,12 @@
 # with WOLFSSL_DIR=... / WOLFTPM_DIR=...). Default toolchain is the Microchip
 # SoftConsole GCC 8.3.0 (riscv64-unknown-elf-, rv32imc): the fwTPM needs no floats
 # or -O2, and this is the toolchain it was validated on. To build with a modern
-# GCC (>= 12) instead, pass ARCH=rv32imc_zicsr_zifencei (csrw needs zicsr). Note:
-# wolfTPM's tpm2_types.h XSLEEP_MS calls nanosleep, which GCC >= 14 rejects as an
-# implicit declaration on bare-metal newlib, so SoftConsole is the default here.
+# GCC (>= 12) instead, pass ARCH=rv32imc_zicsr_zifencei (csrw needs zicsr).
+# GCC >= 14 used to fail here because wolfTPM's tpm2_types.h reaches an XSLEEP_MS
+# branch that calls nanosleep(), which bare-metal newlib does not declare; that is
+# handled now by defining XSLEEP_MS in user_settings.h, so a newer toolchain builds
+# cleanly. SoftConsole remains the default only because it is the version Microchip
+# ships; the PQC build in fact needs a newer GCC to fit (see README).
 #
 # Copyright (C) 2006-2026 wolfSSL Inc. GPLv2+ (see source headers).
 
@@ -60,6 +63,7 @@ NOWARN_RWX := $(shell $(CC) -Wl,--no-warn-rwx-segments -Wl,--version >/dev/null 
 # ECC P-384 at aggressive optimization on this target, so LTO must be validated
 # with full ECC/RSA operations on the board before use.
 EXTRA_CFLAGS ?=
+EXTRA_LDFLAGS ?=
 
 ARCHFLAGS = -march=$(ARCH) -mabi=ilp32 -mcmodel=medany
 CFLAGS    = $(ARCHFLAGS) $(OPT) -g3 -MMD -MP -ffunction-sections -fdata-sections \
@@ -73,9 +77,13 @@ ASFLAGS   = $(ARCHFLAGS)
 LDSCRIPT  = miv-rv32-ram.ld
 # The fwTPM prints no floating point (integer-only printf), so the float printf
 # support (_dtoa_r + soft-float helpers) is left out to save code space.
+# EXTRA_LDFLAGS is appended last so callers can override linker-script symbols
+# without restating LDFLAGS, e.g. to shrink the heap reservation:
+#   make EXTRA_LDFLAGS=-Wl,--defsym=__heap_size=114688
 LDFLAGS   = $(ARCHFLAGS) $(OPT) -T $(LDSCRIPT) -nostartfiles \
             --specs=nano.specs \
-            -Wl,--gc-sections -Wl,-Map=$(TARGET).map $(NOWARN_RWX)
+            -Wl,--gc-sections -Wl,-Map=$(TARGET).map $(NOWARN_RWX) \
+            $(EXTRA_LDFLAGS)
 
 # wolfCrypt
 WOLF_SRCS = $(wildcard $(WOLFSSL_DIR)/wolfcrypt/src/*.c)

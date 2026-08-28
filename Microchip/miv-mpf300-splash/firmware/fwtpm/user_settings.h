@@ -153,6 +153,17 @@ extern int miv_get_seed(unsigned char* output, unsigned int sz);
 #define WOLFSSL_NO_SHAKE256
 #endif
 
+/* wolfTPM's tpm2_types.h selects an XSLEEP_MS implementation from a chain of
+ * platform tests. On RISC-V bare-metal newlib __ARM_EABI__ is not defined, so
+ * it falls through to the _POSIX_C_SOURCE branch and calls nanosleep(), which
+ * newlib does not declare in a freestanding build. GCC 8.3 accepted that as a
+ * warning; GCC 14 and newer reject an implicit declaration outright. The fwTPM
+ * server never sleeps (XSLEEP_MS is only used by the TPM firmware-update code,
+ * which this port does not build), so define it as a no-op here. */
+#ifndef XSLEEP_MS
+#define XSLEEP_MS(ms) do { (void)(ms); } while (0)
+#endif
+
 #ifdef __cplusplus
 }
 #endif

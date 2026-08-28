@@ -439,6 +439,24 @@ python3 fwtpm_uart_test.py         /dev/ttyUSBx   # caps/PCR/random
 python3 fwtpm_nv_persist_test.py   /dev/ttyUSBx   # NV persistence
 ```
 
+### Toolchain and the 512 KB fit
+
+The PQC image is a tight fit in the 512 KB LSRAM and the toolchain matters. The Microchip SoftConsole GCC 8.3.0 build overflows against current wolfSSL/wolfTPM master; build it with a newer RISC-V GCC at `-Os` instead (an xPack `riscv-none-elf-gcc` 15.x multilib with rv32imc/ilp32 soft-float newlib works):
+
+```
+make CROSS_COMPILE=/path/to/xpack-riscv-none-elf-gcc/bin/riscv-none-elf- \
+     OPT=-Os ARCH=rv32imc_zicsr_zifencei \
+     EXTRA_CFLAGS=-DMIV_FWTPM_PQC \
+     EXTRA_LDFLAGS=-Wl,--defsym=__heap_size=114688
+```
+
+Two notes on that command:
+
+* `ARCH=rv32imc_zicsr_zifencei` is required for GCC 12 and newer, which split `zicsr`/`zifencei` out of the base `i` extension.
+* `__heap_size` defaults to 128 KB in `miv-rv32-ram.ld`. The PQC image no longer fits with that default, so the line above trims it to 112 KB. If a future wolfCrypt grows further, trim the heap again or drop an ML-DSA level; the linker tells you exactly how many bytes over you are.
+
+Do not use `-O2` here: it is roughly 60 KB larger than `-Os` on this image and does not fit at all.
+
 Optional build flags are documented in `firmware/fwtpm/Makefile` (`EXTRA_CFLAGS`):
 authenticated-ciphertext NV (`-DMIV_SNVM_NV_AUTH`) and the sNVM boot-counter
 self-test (`-DMIV_SNVM_BOOTCNT_TEST`). Note that `-DMIV_FWTPM_PQC` and
