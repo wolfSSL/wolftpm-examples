@@ -97,6 +97,10 @@ LDFLAGS += -specs=nano.specs
 endif
 LDFLAGS += -lc -lm
 
+# Appended last so heap/stack can be resized without editing the linker script:
+#   make EXTRA_LDFLAGS="-Wl,--defsym=_Min_Heap_Size=0x10000"
+LDFLAGS += $(EXTRA_LDFLAGS)
+
 # ========================================================================= #
 # Source files                                                              #
 # ========================================================================= #
