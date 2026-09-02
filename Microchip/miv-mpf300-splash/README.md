@@ -380,7 +380,7 @@ cd firmware/hello
 make
 ```
 
-This produces `miv-hello.elf` / `.hex` (entry `0x80000000`, ~5 KB, fits the stock 16 KB AHB window so it runs on the unmodified reference design). Program the FPGA with the Mi-V platform (see `fpga/README.md`), then JTAG-load the ELF and run (SoftConsole debug, or OpenOCD with a Mi-V config over the FT4232H). Expected console output at 115200 8N1:
+This produces `miv-hello.elf` / `.hex` (entry `0x80000000`, ~5 KB, fits the stock 16 KB AHB window so it runs on the unmodified reference design). Program the FPGA with the Mi-V platform (see `fpga/README.md`), then JTAG-load the ELF and run (SoftConsole debug, or OpenOCD with a Mi-V config over the FT4232H). If OpenOCD's `fpServer` segfaults on a host with many USB serial devices, launch it via `tools/fp5-jtag.sh` (see the troubleshooting section in `fpga/README.md`). Expected console output at 115200 8N1:
 
 ```
 ========================================================
@@ -429,7 +429,7 @@ cd firmware/fwtpm
 make                       # default: plaintext sNVM NV, Nonce Service entropy, no boot-counter
 ```
 
-JTAG-load `miv-fwtpm.elf`. The banner reports the NV backend and a live Nonce
+JTAG-load `miv-fwtpm.elf` (via `tools/fp5-jtag.sh` if `fpServer` segfaults - see `fpga/README.md`). The banner reports the NV backend and a live Nonce
 Service seed, the self-test runs `TPM2_Startup` + `TPM2_GetRandom`, and the device then
 serves TPM 2.0 over the UART. Drive it from the PC with the host clients:
 

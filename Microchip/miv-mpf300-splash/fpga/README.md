@@ -113,6 +113,25 @@ used to bring up the hello-world firmware.
 The hello-world console banner and per-second heartbeat then appear on the CoreUARTapb
 UART (FT4232H channel C).
 
+### Troubleshooting: fpServer / FlashPro Express segfault with many FTDI devices
+
+`libfpcomm` (shared by SoftConsole's `fpServer` and Libero's FlashPro Express, so both fail together) corrupts memory during FlashPro port enumeration when the host exposes many FTDI-family USB serial devices, and then segfaults at a varying downstream point - typically in `EnumeratePorts` or as a NULL-handle crash in `FpcommFp6Programmer::FlushUsbBuffer` (`add_to_flying_list`), even though the port itself was detected and listed correctly (`FlashPro ports available: E<serial>`).
+
+The workaround is the `tools/usbfilter.c` LD_PRELOAD shim, which hides every USB device except the FlashPro and its parent hub from directory enumeration. Launch OpenOCD through the wrapper, which computes the allowlist at run time and builds the shim on first use:
+
+```bash
+bash tools/fp5-jtag.sh        # instead of invoking openocd directly
+```
+
+For fabric programming with FlashPro Express, print and source the same environment first:
+
+```bash
+eval "$(FPEXPRESS_ENV=1 bash tools/fp5-jtag.sh)"
+xvfb-run FPExpress SCRIPT:program.tcl LOGFILE:program.log
+```
+
+The hardware-only alternative is unplugging enough of the other FTDI-based USB serial adapters before programming.
+
 ## Programming and console
 
 - JTAG/FlashPro and the UART console are both on the FT4232H. Identify which `ttyUSB` is the CoreUARTapb console (115200 8N1) on your host.
