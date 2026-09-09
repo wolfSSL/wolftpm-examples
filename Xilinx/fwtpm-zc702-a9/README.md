@@ -2,7 +2,9 @@
 
 Firmware TPM 2.0 (from [wolfTPM](https://github.com/wolfSSL/wolfTPM) `fwtpm`) running bare-metal on a single **Cortex-A9** (ARMv7-A) of an AMD/Xilinx **Zynq-7000** (ZC702). The fwTPM server is driven from a host PC over UART using the same raw swtpm + Microsoft-simulator ("mssim") framing as the STM32H5 and Mi-V ports, so the stock wolfTPM swtpm client drives it unmodified.
 
-Its distinguishing feature is that the TPM's NV-journal integrity key is a **device-unique key derived from the Cortex-A9 on-chip-memory (OCM) SRAM power-on state**, using wolfCrypt's configurable SRAM PUF (a BCH(127,k,t) fuzzy extractor + HKDF). No root key is stored in flash: it is regenerated from silicon each boot.
+Its distinguishing feature is that the TPM's NV-journal integrity key is a **device-unique key derived from the power-on state of uninitialized DDR**, using wolfCrypt's configurable SRAM PUF (a BCH(127,k,t) fuzzy extractor + HKDF). No root key is stored in flash: it is regenerated from silicon each boot.
+
+Note that the PUF source on this board is **DDR, not OCM**. The Zynq-7000 BootROM clears the whole on-chip memory before any user code runs, so every OCM address reads back as zeros after a cold power cycle and there is no power-on entropy to extract there. DDR is left alone - `ps7_init` brings the controller up but never scrubs the array. See [SRAM PUF: test and use](#sram-puf-test-and-use) for the measurements.
 
 ## Architecture
 
@@ -15,7 +17,7 @@ Its distinguishing feature is that the TPM's NV-journal integrity key is a **dev
 |   |  wolfTPM fwTPM engine (FWTPM_ProcessCommand)      |   |
 |   |    NV journal  --> volatile RAM (default)         |   |
 |   |                    QSPI flash (opt-in)            |   |
-|   |    integrity key <-- SRAM PUF (OCM power-on)      |   |
+|   |    integrity key <-- SRAM PUF (DDR power-on)      |   |
 |   |    clock       <-- MPCore Global Timer            |   |
 |   |    entropy     <-- wolfCrypt MemUse (no HW TRNG)  |   |
 |   +---------------------------------------------------+   |
@@ -45,7 +47,7 @@ firmware/
     fwtpm_clock_zynq.c  clock HAL (Global Timer) + entropy hi-res timer (PMCCNTR)
     fwtpm_nv_ram.c   volatile NV backend (default)
     fwtpm_nv_qspi.c  persistent NV + PUF helper store in QSPI (-DFWTPM_NV_QSPI)
-    fwtpm_puf.c/.h   OCM SRAM PUF -> device-unique NV integrity key
+    fwtpm_puf.c/.h   DDR power-on PUF -> device-unique NV integrity key
     fwtpm_puf_selftest.c  synthetic PUF regression (build -DFWTPM_PUF_SELFTEST)
     user_settings.h  wolfSSL + wolfTPM configuration
     zynq7000-fwtpm.ld    linker (DDR @ 0x04000000)
@@ -114,9 +116,13 @@ python3 swtpm_uart_bridge.py /dev/ttyUSB0 2321 &
 
 ## SRAM PUF: test and use
 
-- **Test (synthetic).** The `-DFWTPM_PUF_SELFTEST` build injects deterministic synthetic SRAM (`WOLFSSL_PUF_TEST`) and runs enroll -> clean reconstruct -> reconstruct at the BCH correction limit (t flips) -> over-limit (t+1 flips must fail or differ) -> bad-argument -> zeroize, printing per-step results and `Result: 0 (PASS)`. This proves the fuzzy-extractor math on the A9 silicon independent of the physical OCM. Sweep `PUF_T` / `PUF_CW` to characterize a profile.
+- **Test (synthetic).** The `-DFWTPM_PUF_SELFTEST` build injects deterministic synthetic SRAM (`WOLFSSL_PUF_TEST`) and runs enroll -> clean reconstruct -> reconstruct at the BCH correction limit (t flips) -> over-limit (t+1 flips must fail or differ) -> bad-argument -> zeroize, printing per-step results and `Result: 0 (PASS)`. This proves the fuzzy-extractor math on the A9 silicon independent of the physical PUF source. Sweep `PUF_T` / `PUF_CW` to characterize a profile.
 
-- **Use (physical).** The default build reads an uninitialized OCM carve-out (`FWTPM_PUF_OCM_ADDR`, near the top of the high-mapped 256 KB OCM) as the PUF source. On first boot it enrolls (generating helper data + a device identity); later boots reconstruct the same stable bits from the persisted helper data, correcting the SRAM noise. The reconstructed bits HKDF-derive a 32-byte key that backs the fwTPM NV journal's integrity HMAC (`FWTPM_NV_HAL.get_integrity_key`). The BCH profile's `WC_PUF_PROFILE_ID` is persisted with the helper data and checked on reconstruct, so a build mismatch is rejected rather than silently producing a wrong key.
+- **Use (physical).** The default build reads an uninitialized DDR carve-out (`FWTPM_PUF_SRC_ADDR`, default `0x20000000`) as the PUF source, well above the firmware's own link address so nothing writes it first. On first boot it enrolls (generating helper data + a device identity); later boots reconstruct the same stable bits from the persisted helper data, correcting the SRAM noise. The reconstructed bits HKDF-derive a 32-byte key that backs the fwTPM NV journal's integrity HMAC (`FWTPM_NV_HAL.get_integrity_key`). The BCH profile's `WC_PUF_PROFILE_ID` is persisted with the helper data and checked on reconstruct, so a build mismatch is rejected rather than silently producing a wrong key.
+
+  A failed reconstruct is deliberately not retried as an enrollment - that would mask a genuine PUF failure by minting a fresh device key. To re-provision after changing the PUF source or profile, do a clean rebuild (`make clean`; the build does not track `EXTRA_CFLAGS` changes) with `-DFWTPM_PUF_FORCE_ENROLL`, boot that image once, then clean-rebuild without the flag before loading the normal image - a retained force-enroll image would re-key on every boot and orphan persistent NV. The same re-provisioning applies when a reconstruct fails after the board has been powered off for a long period or seen a large temperature swing: the DRAM readout drifts with time and temperature, and once it exceeds the BCH correction budget the firmware deliberately continues without a device key rather than minting a new one.
+
+- **Why DDR and not OCM.** Measured on a ZC702 after a genuine cold power cycle (not `rst -system`, which leaves memory intact): every readable OCM region returned 0 percent ones, i.e. all zeros, because the BootROM clears OCM. Uninitialized DDR returned 30 to 36 percent ones - DRAM powers up biased toward zero - and only **1.7 to 1.8 percent of bits differed between two independent cold power cycles**, comfortably inside the BCH(127, k, t=10) budget of 10 flips per 127-bit codeword. Because a DRAM readout is biased rather than balanced, `WC_PUF_HW_MIN_PCT` is lowered to 20 in `user_settings.h`; the wolfCrypt default floor of 35 percent would reject a healthy DRAM readout.
 
 A **stable key across power cycles** requires persisting the helper data in non-volatile storage. With the default volatile RAM NV the helper data does not survive a reload, so each boot enrolls afresh; build with `-DFWTPM_NV_QSPI` to persist both the helper data and the NV journal in QSPI flash (see below).
 
@@ -139,8 +145,8 @@ With this backend the PUF-derived key is stable across boots: the first boot enr
 | A9 HAL + hello (UART, Global Timer, MMU/cache/VFP) | Hardware-validated (ZC702) |
 | fwTPM over UART (self-test + swtpm/mssim server) | Hardware-validated (ZC702): manufacturer "WOLF", PCR read, GetRandom |
 | SRAM PUF synthetic regression | Hardware-validated (ZC702): Result 0 (PASS) |
-| SRAM PUF -> NV integrity key (physical OCM) | Hardware-validated (ZC702): enrolls a device identity, backs NV integrity |
-| Persistent NV + PUF helper data in QSPI flash | Hardware-validated (ZC702): PUF reconstructs across reload, NV value persists |
+| SRAM PUF -> NV integrity key (physical DDR) | Hardware-validated (ZC702): enrolls a device identity, backs NV integrity |
+| Persistent NV + PUF helper data in QSPI flash | Hardware-validated (ZC702) across genuine cold power cycles: enroll, then two power cycles both reconstruct the same identity, and a TPM NV index written before a power cycle reads back after it |
 
 Note: the A9 runs with the MMU enabled (flat map, DDR Normal write-back cacheable). This is required, not optional - with the MMU off the A9 treats all data as Strongly-Ordered, and the unaligned accesses newlib's `printf` emits fault. See `firmware/common/mmu.c`.
 

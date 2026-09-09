@@ -108,13 +108,21 @@ extern void fwtpm_sleep_ms(unsigned int ms);
 #define HAVE_HKDF
 #define HAVE_HMAC
 
-/* ---- SRAM PUF: device-unique NV integrity key ---- */
-/* Derives the fwTPM NV-journal integrity key from the OCM power-on SRAM state
- * (BCH fuzzy extractor + HKDF; see fwtpm_puf.c). The BCH profile comes from the
+/* ---- Power-on memory PUF: device-unique NV integrity key ---- */
+/* Derives the fwTPM NV-journal integrity key from the power-on state of
+ * uninitialized DDR - NOT on-chip SRAM, which the Zynq-7000 BootROM clears
+ * before any user code runs (BCH fuzzy extractor + HKDF; see fwtpm_puf.c for
+ * the source address and the measurements). The BCH profile comes from the
  * Makefile PUF_T / PUF_CW (-DWC_PUF_BCH_T / -DWC_PUF_NUM_CODEWORDS); puf.h
  * defaults to t=10, cw=16 when unset. Building -DFWTPM_PUF_SELFTEST additionally
  * enables the synthetic on-target regression (WOLFSSL_PUF_TEST). */
 #define WOLFSSL_PUF
+/* The PUF source on this board is uninitialized DDR, and DRAM powers up biased
+ * toward zero (about 30 percent ones measured on a ZC702) rather than the
+ * roughly balanced readout an SRAM PUF gives. Widen the raw-readout health band
+ * accordingly; the default floor of 35 percent would reject a healthy DRAM
+ * readout. The upper bound is left at its default. */
+#define WC_PUF_HW_MIN_PCT   20
 #ifdef FWTPM_PUF_SELFTEST
 #define WOLFSSL_PUF_TEST
 #endif

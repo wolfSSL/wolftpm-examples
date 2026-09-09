@@ -36,6 +36,12 @@
  * success, a wolfCrypt error otherwise. */
 int FwTPM_Puf_Init(int* enrolled);
 
+/* As FwTPM_Puf_Init, but with the re-provisioning decision as an argument:
+ * forceEnroll nonzero ignores any stored helper data and enrolls this boot
+ * (the enrollment fails unless the new helper data is durably persisted).
+ * FwTPM_Puf_Init passes the FWTPM_PUF_FORCE_ENROLL build flag through. */
+int FwTPM_Puf_InitEx(int forceEnroll, int* enrolled);
+
 /* FWTPM_NV_HAL.get_integrity_key hook: returns the 32-byte PUF-derived key.
  * FwTPM_Puf_Init() must have run first. */
 int FwTPM_Puf_GetIntegrityKey(void* halCtx, unsigned char* key,
