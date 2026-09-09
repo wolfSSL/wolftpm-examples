@@ -33,8 +33,8 @@ ENTRY(Reset_Handler)
 
 _estack = ORIGIN(RAM) + LENGTH(RAM);
 
-_Min_Heap_Size  = 0x18000;  /* 96KB heap (matches TZEN=0 budget) */
-_Min_Stack_Size = 0x10000;  /* 64KB stack (RSA keygen needs headroom) */
+PROVIDE(_Min_Heap_Size  = 0xC000);   /* 48KB - see README RAM budget */
+PROVIDE(_Min_Stack_Size = 0xC000);   /* 48KB - see README RAM budget */
 
 MEMORY
 {

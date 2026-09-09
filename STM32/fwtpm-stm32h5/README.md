@@ -206,13 +206,29 @@ across configurations:
 
 | Region | Size | Notes |
 |--------|------|-------|
-| BSS (incl. FWTPM_CTX) | ~94KB | static buffers |
-| Heap reservation | 96KB | wolfCrypt RSA keygen / TPM ops (`_Min_Heap_Size`) |
-| Stack reservation | 64KB | top of RAM (`_Min_Stack_Size`) |
-| **Total RAM used** | ~254KB | |
+| Static BSS (incl. `FWTPM_CTX`) | ~95 KB | `FWTPM_CTX` alone is 97136 bytes |
+| Heap reservation | 48 KB | `_Min_Heap_Size` |
+| Stack reservation | 48 KB | `_Min_Stack_Size`, top of RAM |
+| **Total RAM used** | **~191 KB** | |
 
-TZEN=0 has 640KB SRAM available (386KB headroom). TZEN=1 has 320KB
-Secure SRAM available (66KB headroom).
+TZEN=0 has 640 KB SRAM available; TZEN=1 has 320 KB Secure SRAM, leaving about
+129 KB headroom at these reservations.
+
+Both reservations are overridable without editing the linker script:
+
+```bash
+make TZEN=1 EXTRA_LDFLAGS="-Wl,--defsym=_Min_Heap_Size=0x8000 \
+                           -Wl,--defsym=_Min_Stack_Size=0x8000"
+```
+
+**Where these numbers come from.** Measured on a NUCLEO-H563ZI at TZEN=1 against
+wolfSSL/wolfTPM master. The full example set - `wrap/caps`, `keygen` (RSA and
+ECC), `nvram/store`, `pcr/extend`, `seal/seal` - passes at 32 KB heap + 32 KB
+stack, and RSA-2048 `TPM2_Create` alone still succeeds with only 16 KB of heap.
+The defaults above keep margin over the smallest configuration that was actually
+exercised. Earlier releases reserved 96 KB heap + 64 KB stack on the assumption
+that RSA key generation needed it; measurement does not support that, and the
+reduction frees about 64 KB of secure SRAM.
 
 ## Memory Map (TZEN=0)
 
@@ -268,12 +284,17 @@ uint32_t rspSz = sizeof(rsp);
 int rc = FWTPM_NSC_ExecuteCommand(cmd, cmdLen, rsp, &rspSz);
 ```
 
-## Known Issues
+## Notes
 
-- **RSA Create (child key)**: `TPM2_Create` with RSA type fails with
-  `TPM_RC_FAILURE`. RSA CreatePrimary works. Under investigation — likely
-  stack overflow or wolfCrypt configuration issue during `wc_MakeRsaKey`.
-  ECC key operations work correctly.
+- **RSA key generation is slow and highly variable.** RSA-2048 `TPM2_Create` on
+  this part has been measured anywhere from 5 to 37 seconds; the spread is the
+  prime search, not the port. It does succeed. A client with a short timeout can
+  give up first and report the failure as `TPM_RC_FAILURE`, which is what an
+  earlier revision of this document recorded as a defect. ECC P-256 is
+  effectively instant and is the better choice for interactive use.
+- The UART command loop is byte-oriented, so a client interrupted mid-command
+  leaves the stream out of sync. The first command issued after a board reset is
+  the usual victim; reset the board or simply retry.
 
 ## Adding New STM32 Targets
 
