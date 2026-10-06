@@ -1,0 +1,1547 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Post-Quantum TPM Demo</title>
+<style>
+  :root {
+    --bg: #0b1014;
+    --panel: #131a21;
+    --panel-2: #1a232c;
+    --line: #26323d;
+    --fg: #e8eef4;
+    --muted: #8899a8;
+    --accent: #3fb8af;
+    --pass: #35c46a;
+    --fail: #e5484d;
+    --wait: #e8a33d;
+    --pq: #3fb8af;
+    --classical: #6b7a8a;
+  }
+  html { scrollbar-gutter: stable; }
+  [hidden] { display: none !important; }
+  table.cmp td.ok { color: var(--pass); }
+  /* Without horizontal padding the right-aligned match column butts straight
+     into the left-aligned issuer name and reads as one word. */
+  table.cmp td + td, table.cmp th + th { padding-left: 1rem; }
+  table.cmp th.left, table.cmp td.issuer { text-align: left; }
+  table.cmp td.issuer { font-weight: 500; white-space: normal;
+                        color: var(--muted); font-size: .9rem; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 18px; line-height: 1.45;
+  }
+  header {
+    display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap;
+    padding: 1.1rem 1.6rem; border-bottom: 1px solid var(--line);
+    background: var(--panel);
+  }
+  header h1 { margin: 0; font-size: 1.5rem; letter-spacing: -0.01em; }
+  header .sub { color: var(--muted); font-size: 1rem; }
+  .chip {
+    margin-left: auto; font-size: 0.95rem; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 0.25rem 0.85rem; white-space: nowrap;
+  }
+  .chip b { color: var(--accent); font-weight: 600; }
+  .dot { display:inline-block; width:.55rem; height:.55rem; border-radius:50%;
+         background: var(--fail); margin-right:.45rem; vertical-align: middle; }
+  .dot.on { background: var(--pass); }
+
+  .claim { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+           padding: .85rem 1.6rem; background: var(--panel-2);
+           border-bottom: 1px solid var(--line); font-size: 1.05rem; }
+  .claim .cue { margin-left: auto; color: var(--accent); font-weight: 600;
+                font-size: .95rem; white-space: nowrap;
+                border: 1px solid var(--accent); border-radius: 999px;
+                padding: .2rem .8rem; opacity: 0; transition: opacity .4s; }
+  .claim.idle .cue { opacity: 1; }
+
+  .tabs { display: flex; gap: .4rem; align-items: center; flex-wrap: wrap;
+          padding: 0 1.6rem; background: var(--panel);
+          border-bottom: 1px solid var(--line); }
+  .tab { font: inherit; font-weight: 600; font-size: 1rem; color: var(--muted);
+         background: none; border: 0; border-bottom: 3px solid transparent;
+         border-radius: 0; padding: .85rem 1.1rem; cursor: pointer; }
+  .tab:hover { color: var(--fg); }
+  .tab.active { color: var(--fg); border-bottom-color: var(--accent); }
+  .tab.auto { margin-left: auto; font-size: .92rem; }
+  .view { padding-top: 1.4rem; }
+  .pcrgrid { display: grid; gap: .45rem; margin: 1rem 0;
+             grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); }
+  .pcrcell { display: flex; align-items: baseline; gap: .7rem;
+             padding: .45rem .7rem; border: 1px solid var(--line);
+             border-radius: 7px; background: var(--panel-2); }
+  .pcrcell .i { color: var(--muted); font-size: .85rem; min-width: 3.4rem;
+                font-variant-numeric: tabular-nums; }
+  .pcrcell .d { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                font-size: .82rem; color: var(--muted); }
+  .pcrcell.set .d { color: var(--accent); }
+  .pcrcell.set { border-color: #2a4e4a; }
+  .pcrcell.drtm .d { color: #6b7a8a; }
+  .pcrcell.hit { border-color: var(--wait); }
+  .pcrcell.hit .d { color: var(--wait); }
+
+  .lead { margin: 0 0 1rem; color: var(--muted); font-size: 1rem;
+          max-width: 70ch; }
+  .lead b { color: var(--fg); }
+
+  main { padding: 0 1.6rem 1.4rem; display: grid; gap: 1.4rem;
+         grid-template-columns: 1fr 1fr; max-width: 1600px; }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+
+  .panel { background: var(--panel); border: 1px solid var(--line);
+           border-radius: 12px; padding: 1.1rem 1.25rem; }
+  .panel h2 { margin: 0 0 .9rem; font-size: .95rem; letter-spacing: .09em;
+              text-transform: uppercase; color: var(--muted); font-weight: 600; }
+
+  .controls { display: flex; gap: .7rem; flex-wrap: wrap; align-items: center; }
+  button {
+    font: inherit; font-weight: 600; color: var(--fg);
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 9px; padding: .7rem 1.3rem; cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); color: #06231f; border-color: transparent; }
+  button.danger  { background: #3a1d1f; border-color: #6b2b2f; color: #ffc9cb; }
+  select { font: inherit; background: var(--panel-2); color: var(--fg);
+           border: 1px solid var(--line); border-radius: 9px; padding: .65rem .8rem; }
+
+  /* Pipeline */
+  ol.steps { list-style: none; margin: 0; padding: 0; }
+  ol.steps li {
+    display: grid; grid-template-columns: 1.7rem 1fr auto; gap: .8rem;
+    align-items: center; padding: .62rem 0;
+    border-bottom: 1px dashed var(--line); color: var(--muted);
+  }
+  ol.steps li:last-child { border-bottom: 0; }
+  ol.steps li .mark {
+    width: 1.7rem; height: 1.7rem; border-radius: 50%; display: grid;
+    place-items: center; border: 2px solid var(--line); font-size: .95rem;
+  }
+  ol.steps li.active { color: var(--fg); }
+  ol.steps li.active .mark { border-color: var(--wait); color: var(--wait); }
+  ol.steps li.done { color: var(--fg); }
+  ol.steps li.done .mark { border-color: var(--pass); color: var(--pass); }
+  ol.steps li.bad  { color: #ffc9cb; }
+  ol.steps li.bad .mark { border-color: var(--fail); color: var(--fail); }
+  ol.steps .detail { font-variant-numeric: tabular-nums; color: var(--muted);
+                     font-size: .95rem; text-align: right; }
+  ol.steps .detail.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                          font-size: .85rem; }
+  ol.steps .detail.secret { color: var(--accent); font-weight: 700; }
+
+  /* Verdict */
+  .verdict { margin-top: 1rem; border-radius: 10px; padding: 1.1rem 1.2rem;
+             border: 1px solid var(--line); background: var(--panel-2); }
+  .verdict .big { font-size: 1.9rem; font-weight: 700; letter-spacing: -0.01em; }
+  .verdict .why { color: var(--muted); font-size: .98rem; margin-top: .25rem; }
+  .verdict.pass { border-color: #1f5c39; background: #10281b; }
+  .verdict.pass .big { color: var(--pass); }
+  .verdict.fail { border-color: #6b2b2f; background: #2a1416; }
+  .verdict.fail .big { color: var(--fail); }
+
+  /* Size comparison */
+  .bar-row { margin: .85rem 0; }
+  .bar-label { display: flex; justify-content: space-between; font-size: .95rem;
+               margin-bottom: .3rem; }
+  .bar-label .n { font-variant-numeric: tabular-nums; color: var(--fg); font-weight: 600; }
+  .bar { height: 1.5rem; border-radius: 6px; background: var(--panel-2); overflow: hidden; }
+  .bar span { display: block; height: 100%; width: 0;
+              transition: width .7s cubic-bezier(.2,.7,.3,1); }
+  .bar span.pq { background: var(--pq); }
+  .bar span.cl { background: var(--classical); }
+  .ratio { color: var(--muted); font-size: .95rem; margin-top: .7rem; }
+  .ratio b { color: var(--fg); }
+
+  table.cmp { width: 100%; border-collapse: collapse; font-size: .96rem; }
+  table.cmp th { text-align: right; font-weight: 600; color: var(--muted);
+                 font-size: .8rem; letter-spacing: .05em; text-transform: uppercase;
+                 padding: 0 0 .45rem; border-bottom: 1px solid var(--line); }
+  table.cmp th:first-child { text-align: left; }
+  table.cmp td { padding: .5rem 0; border-bottom: 1px dashed var(--line);
+                 text-align: right; font-variant-numeric: tabular-nums;
+                 font-weight: 600; }
+  table.cmp td:first-child { text-align: left; font-weight: 500;
+                             color: var(--muted); white-space: nowrap; }
+  table.cmp tr:last-child td { border-bottom: 0; }
+  table.cmp tr.row-pq td { color: var(--fg); }
+  table.cmp tr.row-pq td:first-child { color: var(--fg); font-weight: 600; }
+
+  table.kv { width: 100%; border-collapse: collapse; font-size: .98rem; }
+  table.kv td { padding: .42rem 0; border-bottom: 1px dashed var(--line); }
+  table.kv td:last-child { text-align: right; font-variant-numeric: tabular-nums;
+                           font-weight: 600; }
+  table.kv tr:last-child td { border-bottom: 0; }
+
+  pre.log { margin: 0; max-height: 15rem; overflow: auto; font-size: .85rem;
+            line-height: 1.5; color: var(--muted); white-space: pre-wrap;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .note { color: var(--muted); font-size: .92rem; margin-top: .8rem; }
+
+  /* Byte mosaic: one cell per signature byte. Canvas rather than DOM nodes -
+     4627 elements is sluggish to lay out, a canvas is instant. */
+  .mosaics { display: flex; gap: 1.6rem; align-items: flex-start; flex-wrap: wrap; }
+  .mosaic { margin: 0; flex: 0 1 auto; min-width: 0; }
+  .mosaic.grow { flex: 1 1 auto; }
+  /* Fixed column: otherwise the classical canvas (300px by default, ~96px
+     once drawn) changes width between runs and the post-quantum grid is laid
+     out against last run's geometry. */
+  #m-cl-col { flex: 0 0 165px; min-width: 0; display: flex;
+              flex-direction: column; gap: 1.1rem; }
+  .mosaic figcaption { display: flex; align-items: center; gap: .5rem;
+                       font-size: .95rem; margin-bottom: .5rem;
+                       white-space: nowrap; }
+  .mosaic figcaption .n { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .mosaic canvas { display: block; max-width: 100%; border-radius: 6px;
+                   background: var(--panel-2); }
+  #m-pq { width: 100%; }
+  .tag { width: .8rem; height: .8rem; border-radius: 3px; flex: none;
+         display: inline-block; vertical-align: middle; }
+  /* The classical caption grows from "-" to "64 cells" mid-run. Left as a
+     nowrap flex line its column widens by 35px at that moment, after the
+     post-quantum grid beside it has already been laid out. Letting it wrap
+     inside its reserved column keeps the geometry fixed for the whole run. */
+  #m-cl-col figcaption { display: block; white-space: normal; }
+  .tag.pq { background: var(--pq); }
+  .tag.cl { background: var(--classical); }
+  .mosaic.flash canvas { animation: tamperflash .55s ease-out 2; }
+  @keyframes tamperflash {
+    0%   { box-shadow: 0 0 0 0 rgba(229,72,77,.85); }
+    100% { box-shadow: 0 0 0 14px rgba(229,72,77,0); }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Post-Quantum TPM</h1>
+  <span class="sub">wolfTPM &middot; wolfCrypt &middot; ML-DSA on real silicon</span>
+  <span class="chip"><span class="dot" id="conn-dot"></span>TPM <b id="tpm-id">detecting&hellip;</b></span>
+</header>
+
+<div class="claim" id="claim">
+  <span id="claim-text">A post-quantum TPM, driven by wolfTPM. Keys are generated
+  inside the chip and never leave it &mdash; that same silicon does the work on
+  every tab below, live, bar the PQ TLS handshake, which runs against wolfTPM's
+  firmware TPM and says so.</span>
+  <span class="cue" id="claim-cue">Press a button to run it yourself</span>
+</div>
+
+<nav class="tabs">
+  <button class="tab active" data-tab="sign">Sign &amp; verify</button>
+  <button class="tab" data-tab="seal">Sealed secret</button>
+  <button class="tab" data-tab="ek">EK certificates</button>
+  <button class="tab" data-tab="pcr">Measured boot</button>
+  <button class="tab" data-tab="spdm">SPDM</button>
+  <button class="tab" data-tab="tls">PQ TLS</button>
+  <button class="tab" data-tab="console">Console</button>
+  <button id="btn-attract" class="tab auto" title="Run the demo on a loop when nobody is touching it">Auto</button>
+</nav>
+
+<main id="view-sign" class="view">
+  <section class="panel">
+    <h2>Run</h2>
+    <div class="controls">
+      <button class="primary" id="btn-run">Sign &amp; verify</button>
+      <button class="danger" id="btn-tamper">Tamper the signature</button>
+      <span id="param-wrap"></span>
+      <button id="btn-reset" title="Pulse the TPM reset line">Reset TPM</button>
+    </div>
+
+    <ol class="steps" id="steps">
+      <li data-k="startup"><span class="mark">1</span><span>TPM ready</span><span class="detail"></span></li>
+      <li data-k="key"><span class="mark">2</span><span>TPM generates ML-DSA key pair</span><span class="detail"></span></li>
+      <li data-k="sign"><span class="mark">3</span><span>TPM signs digest (private key never leaves)</span><span class="detail"></span></li>
+      <li data-k="tamper"><span class="mark">!</span><span>Signature bit flipped</span><span class="detail"></span></li>
+      <li data-k="verify"><span class="mark">4</span><span>MCU verifies with wolfCrypt</span><span class="detail"></span></li>
+    </ol>
+
+    <div class="verdict" id="verdict">
+      <div class="big" id="verdict-big">Ready</div>
+      <div class="why" id="verdict-why">Press &ldquo;Sign &amp; verify&rdquo; to run on the TPM.</div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Post-quantum vs classical &mdash; same TPM, same digest</h2>
+
+    <div class="bar-row">
+      <div class="bar-label"><span id="pq-label">ML-DSA-87 signature</span><span class="n" id="pq-n">&mdash;</span></div>
+      <div class="bar"><span class="pq" id="pq-bar"></span></div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-label"><span>ECDSA P-384 signature</span><span class="n" id="c384-n">&mdash;</span></div>
+      <div class="bar"><span class="cl" id="c384-bar"></span></div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-label"><span>ECDSA P-256 signature</span><span class="n" id="cl-n">&mdash;</span></div>
+      <div class="bar"><span class="cl" id="cl-bar"></span></div>
+    </div>
+    <div class="ratio" id="ratio"></div>
+
+    <h2 style="margin-top:1.5rem">What it costs</h2>
+    <table class="cmp">
+      <thead>
+        <tr><th>Algorithm</th><th>Signature</th><th>TPM key gen</th><th>TPM sign</th></tr>
+      </thead>
+      <tbody>
+        <tr class="row-pq">
+          <td><span class="tag pq"></span> ML-DSA-<span id="c-pq-set">87</span></td>
+          <td id="c-pq-sz">&mdash;</td><td id="c-pq-kg">&mdash;</td><td id="c-pq-sg">&mdash;</td>
+        </tr>
+        <tr>
+          <td><span class="tag cl"></span> ECDSA P-384</td>
+          <td id="c-384-sz">&mdash;</td><td id="c-384-kg">&mdash;</td><td id="c-384-sg">&mdash;</td>
+        </tr>
+        <tr>
+          <td><span class="tag cl"></span> ECDSA P-256</td>
+          <td id="c-256-sz">&mdash;</td><td id="c-256-kg">&mdash;</td><td id="c-256-sg">&mdash;</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="note" id="verify-note"></div>
+  </section>
+
+  <section class="panel" style="grid-column: 1 / -1;">
+    <h2>The signature itself &mdash; one cell per byte</h2>
+    <div class="mosaics">
+      <figure class="mosaic grow" id="m-pq-fig">
+        <figcaption><span class="tag pq"></span><b id="m-pq-title">ML-DSA-87</b>
+          <span class="n" id="m-pq-n">&mdash;</span></figcaption>
+        <canvas id="m-pq"></canvas>
+      </figure>
+      <div class="mosaic-col" id="m-cl-col">
+        <figure class="mosaic" id="m-384-fig">
+          <figcaption><span class="tag cl"></span><b>ECDSA P-384</b>
+            <span class="n" id="m-384-n">&mdash;</span></figcaption>
+          <canvas id="m-384" width="0" height="0"></canvas>
+        </figure>
+        <figure class="mosaic" id="m-cl-fig">
+          <figcaption><span class="tag cl"></span><b>ECDSA P-256</b>
+            <span class="n" id="m-cl-n">&mdash;</span></figcaption>
+          <canvas id="m-cl" width="0" height="0"></canvas>
+        </figure>
+      </div>
+    </div>
+    <div class="note" id="m-note">All three grids are drawn at the same scale, and every
+      cell is one byte of a signature this TPM just produced.</div>
+  </section>
+
+</main>
+
+<main id="view-seal" class="view" hidden>
+  <section class="panel" style="grid-column: 1 / -1;">
+    <h2>Sealed secret &mdash; released only in the right state</h2>
+    <p class="lead">A TPM can lock a secret to a measurement of the system it is
+      in, and hand it back only while that measurement still matches. Below,
+      the secret is sealed to one state, released in that state, and then the
+      state is deliberately changed &mdash; whereupon the same chip refuses the
+      same blob. <b>The refusal at the end is the demo working, not failing.</b></p>
+    <div class="controls" style="margin-bottom:1rem">
+      <button class="primary" id="btn-seal">Run it</button>
+    </div>
+    <ol class="steps" id="seal-steps">
+      <li data-k="reset"><span class="mark">1</span><span>PCR 16 reset to a known measurement</span><span class="detail"></span></li>
+      <li data-k="create"><span class="mark">2</span><span>Secret sealed to that measurement</span><span class="detail"></span></li>
+      <li data-k="before"><span class="mark">3</span><span>TPM releases the secret</span><span class="detail"></span></li>
+      <li data-k="extend"><span class="mark">!</span><span>Measurement changes &mdash; PCR extended</span><span class="detail"></span></li>
+      <li data-k="after"><span class="mark">4</span><span>TPM refuses the same sealed blob</span><span class="detail"></span></li>
+    </ol>
+    <div class="verdict" id="seal-verdict">
+      <div class="big" id="seal-big">Running&hellip;</div>
+      <div class="why" id="seal-why">Talking to the TPM.</div>
+    </div>
+  </section>
+
+</main>
+
+<main id="view-ek" class="view" hidden>
+  <section class="panel" style="grid-column: 1 / -1;">
+    <h2>Endorsement certificates &mdash; issued at manufacture</h2>
+    <p class="lead">Every TPM leaves the factory with certificates written into
+      its own storage, signed by the manufacturer, stating what it is. The chip
+      does not merely claim its identity &mdash; the vendor attests to it.</p>
+    <div class="controls" style="margin-bottom:1rem">
+      <button class="primary" id="btn-ek">Read certificates</button>
+    </div>
+    <div class="note" id="ek-summary" style="margin-top:0"></div>
+    <table class="cmp">
+      <thead>
+        <tr><th>NV handle</th><th>Key</th><th>Hash</th><th>Certificate</th>
+          <th>Serial</th><th>Matches EK</th><th class="left">Issued by</th></tr>
+      </thead>
+      <tbody id="ek-rows"></tbody>
+    </table>
+    <div class="note" id="ek-chain"></div>
+  </section>
+
+</main>
+
+<main id="view-pcr" class="view" hidden>
+  <section class="panel" style="grid-column: 1 / -1;">
+    <h2>Measured boot &mdash; what the TPM has been told</h2>
+    <p class="lead">A platform configuration register cannot be written, only
+      <i>extended</i>: the new value is the hash of the old value concatenated
+      with the new measurement. That is what makes a PCR a record of everything
+      measured, in order, and why a changed measurement can never be quietly
+      walked back. This is the state the sealed secret is bound to.</p>
+    <div class="controls" style="margin-bottom:1rem">
+      <button class="primary" id="btn-pcr">Read all PCRs</button>
+      <button id="btn-pcr-extend">Extend PCR 16</button>
+      <button id="btn-pcr-reset">Reset PCR 16</button>
+    </div>
+    <div class="note" id="pcr-banks" style="margin-top:0"></div>
+    <div class="pcrgrid" id="pcr-grid"></div>
+    <div class="note" id="pcr-note"></div>
+  </section>
+</main>
+
+<main id="view-spdm" class="view" hidden>
+  <section class="panel" style="grid-column: 1 / -1;">
+    <h2>SPDM &mdash; an encrypted channel to the TPM</h2>
+    <p class="lead">The bus between a host and a TPM is plaintext, whether it
+      is SPI or, as on this board, I2C: a cheap logic analyser clipped to it
+      reads every command and every response.
+      SPDM negotiates a session key so the bus carries ciphertext instead.
+      wolfTPM implements the responder as well as the client, so the whole
+      thing can be demonstrated end to end.</p>
+    <div class="controls" style="margin-bottom:1rem">
+      <button class="primary" id="btn-spdm">Run it</button>
+      <span class="n" id="spdm-note" style="color:var(--muted)">Takes about 40 seconds.</span>
+    </div>
+
+    <div class="verdict" id="spdm-silicon" style="margin-bottom:1.2rem">
+      <div class="big" id="spdm-sil-big" style="font-size:1.1rem">The fitted part</div>
+      <div class="why" id="spdm-sil-why">Not yet probed.</div>
+    </div>
+
+    <h2 id="spdm-heading">Secured session against the wolfTPM firmware TPM</h2>
+    <ol class="steps" id="spdm-steps"></ol>
+    <div class="verdict" id="spdm-verdict">
+      <div class="big" id="spdm-big">Not run</div>
+      <div class="why" id="spdm-why">Press Run it.</div>
+    </div>
+  </section>
+</main>
+
+<main id="view-tls" class="view" hidden>
+  <section class="panel" style="grid-column: 1 / -1;">
+    <h2>Post-quantum TLS 1.3 &mdash; identity key inside the TPM</h2>
+    <p class="lead">A TLS server proves who it is by signing the handshake
+      with its private key. Here that key is generated inside a TPM and never
+      leaves it, the signature is post-quantum ML-DSA, and the key exchange is
+      ML-KEM &mdash; so both halves of the handshake are quantum-resistant and
+      the identity is anchored in hardware rather than a file on disk.</p>
+    <div class="verdict" id="tls-silicon" style="margin-bottom:1.2rem">
+      <div class="big" style="font-size:1.1rem">Why not the fitted part</div>
+      <div class="why">TLS CertificateVerify needs <b>pure</b> ML-DSA. This
+        silicon implements only the pre-hash form, so creating the key returns
+        <b>TPM_RC_TYPE</b> &mdash; the same limit that rules out ML-DSA
+        attestation. The handshake below therefore runs against wolfTPM's
+        firmware TPM, which is a socket TPM and never touches the SPI bus.</div>
+    </div>
+    <div class="controls" style="margin-bottom:1rem">
+      <button class="primary" id="btn-tls">Run it</button>
+      <span class="n" id="tls-note" style="color:var(--muted)">Takes about 30 seconds.</span>
+    </div>
+    <ol class="steps" id="tls-steps">
+      <li data-n="1"><span class="mark">1</span><span>Firmware TPM responder ready</span><span class="detail"></span></li>
+      <li data-n="2"><span class="mark">2</span><span>TPM generates the ML-DSA identity key and its certificate</span><span class="detail"></span></li>
+      <li data-n="3"><span class="mark">3</span><span>TLS server listening, private key held in the TPM</span><span class="detail"></span></li>
+      <li data-n="4"><span class="mark">4</span><span>Client completes the handshake</span><span class="detail"></span></li>
+    </ol>
+    <div class="verdict" id="tls-verdict">
+      <div class="big" id="tls-big">Not run</div>
+      <div class="why" id="tls-why">Press Run it.</div>
+    </div>
+  </section>
+</main>
+
+<main id="view-console" class="view" hidden>
+  <section class="panel" style="grid-column: 1 / -1;">
+    <h2>Board console</h2>
+    <p>Everything the board prints that is not a demo event: the bootloader
+    verifying this image before it ran, and anything the firmware logs.</p>
+    <button class="primary" id="btn-reset-board">Reset the board</button>
+    <span class="n" style="color:var(--muted)">Resets the MCU and the TPM together; their reset lines are shared.</span>
+    <pre class="log" id="console-log"></pre>
+  </section>
+</main>
+
+<main class="view">
+  <section class="panel" style="grid-column: 1 / -1;">
+    <h2>Event stream</h2>
+    <pre class="log" id="log"></pre>
+  </section>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var running = false;
+  var tampered = false;
+  var pqBytes = 0, clBytes = 0, c384Bytes = 0;
+  var pqSignMs = 0, clSignMs = 0;
+  var paramSets = [87];
+  var attractOn = true;
+  var runParamSet = 87;
+  var ekSeen = [];
+
+  function setStep(key, state, detail) {
+    var li = document.querySelector('ol.steps li[data-k="' + key + '"]');
+    if (!li) return;
+    li.classList.remove("active", "done", "bad");
+    if (state) li.classList.add(state);
+    if (detail !== undefined) {
+      li.querySelector(".detail").textContent = detail;
+    }
+  }
+
+  function resetSteps() {
+    ["startup", "key", "sign", "tamper", "verify"].forEach(function (k) {
+      setStep(k, null, "");
+    });
+    $("verdict").className = "verdict";
+    $("verdict-big").textContent = "Running…";
+    $("verdict-why").textContent = "Talking to the TPM.";
+    $("verify-note").textContent = "";
+    resetMosaicState();
+  }
+
+  // ---- Byte mosaic --------------------------------------------------
+  // One cell per signature byte, drawn from the real bytes the TPM returned.
+  // Colour is a lightness ramp inside the palette hue rather than a rainbow:
+  // random bytes in full hue look like television static, which reads as
+  // decoration. A single-hue weave reads as data, and it lets one red cell
+  // carry the whole tamper story.
+  var CELL_MIN = 4, CELL_MAX = 11, CELL_GAP = 1;
+  var mosaic = {
+    pq: { canvas: null, data: null, hue: 176, sat: 38, satRange: 34,
+          lo: 12, hi: 80 },
+    c384: { canvas: null, data: null, hue: 210, sat: 6, satRange: 8,
+            lo: 20, hi: 68 },
+    cl: { canvas: null, data: null, hue: 210, sat: 6, satRange: 8,
+          lo: 20, hi: 68 }
+  };
+  var cellPx = 7;          // shared by both grids so the scale is honest
+  var tamperOffset = -1;
+
+  function pqAvailPx() {
+    var w = $("m-pq").getBoundingClientRect().width;
+    return w > 120 ? w : 560;
+  }
+
+  var CANVAS_ID = { pq: "m-pq", c384: "m-384", cl: "m-cl" };
+
+  function now() {
+    return (window.performance && performance.now)
+      ? performance.now() : Date.now();
+  }
+
+  function b64ToBytes(b64) {
+    var bin = atob(b64), n = bin.length, out = new Uint8Array(n), i;
+    for (i = 0; i < n; i++) { out[i] = bin.charCodeAt(i); }
+    return out;
+  }
+
+  function cellColor(m, v) {
+    // Byte value -> lightness across a wide band. A narrow ramp reads as a
+    // flat block of colour from two metres, which loses the whole point: the
+    // texture is what says "this is data". Saturation also tracks value so
+    // the dark end stays distinguishable rather than collapsing to black.
+    var l = m.lo + (v / 255) * (m.hi - m.lo);
+    var sat = m.sat + (v / 255) * m.satRange;
+    return "hsl(" + m.hue + "," + sat.toFixed(1) + "%," + l.toFixed(1) + "%)";
+  }
+
+  // Lay the PQ grid out to fill its column, then reuse that cell size for the
+  // classical grid. Same scale in both is the entire point of the panel.
+  function layout(n, availPx) {
+    var cell = CELL_MAX, cols, rows;
+    for (; cell >= CELL_MIN; cell--) {
+      cols = Math.floor(availPx / (cell + CELL_GAP));
+      if (cols < 1) { continue; }
+      rows = Math.ceil(n / cols);
+      // Aim for a block wider than tall, so it reads as a page of data.
+      if (rows * (cell + CELL_GAP) <= 360) { break; }
+    }
+    if (cell < CELL_MIN) { cell = CELL_MIN; }
+    cols = Math.max(1, Math.floor(availPx / (cell + CELL_GAP)));
+    return { cell: cell, cols: cols, rows: Math.ceil(n / cols) };
+  }
+
+  /* fluid: the element keeps its CSS width and only the bitmap is set, from
+     the box as actually rendered. Used for the post-quantum grid, whose
+     column width moves as the page below it grows. */
+  function sizeCanvasFluid(cv, rows, cell) {
+    var dpr = window.devicePixelRatio || 1;
+    var w = cv.getBoundingClientRect().width;
+    var h = rows * (cell + CELL_GAP);
+    var ctx;
+    cv.width = Math.round(w * dpr);
+    cv.height = Math.round(h * dpr);
+    cv.style.height = h + "px";
+    ctx = cv.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    return ctx;
+  }
+
+  /* fixed: the classical grid is a small block in a reserved column, so it
+     can be sized outright. */
+  function sizeCanvasFixed(cv, cols, rows, cell) {
+    var dpr = window.devicePixelRatio || 1;
+    var w = cols * (cell + CELL_GAP), h = rows * (cell + CELL_GAP);
+    var ctx;
+    cv.width = Math.round(w * dpr);
+    cv.height = Math.round(h * dpr);
+    cv.style.width = w + "px";
+    cv.style.height = h + "px";
+    ctx = cv.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    return ctx;
+  }
+
+  // Each mosaic animates independently. The generation counter is what makes
+  // that safe: a run that starts while the previous one is still painting
+  // bumps it, and the stale frame callback then does nothing instead of
+  // drawing into a canvas that has been resized underneath it.
+  function paint(m, upto) {
+    var n, cols, cell, ctx, i, x, y;
+    if (!m.canvas || !m.data) { return; }
+    n = m.data.length;
+    cols = m.cols;
+    cell = m.cell;
+    ctx = m.ctx;
+    if (upto === undefined || upto > n) { upto = n; }
+    for (i = m.painted; i < upto; i++) {
+      x = (i % cols) * (cell + CELL_GAP);
+      y = Math.floor(i / cols) * (cell + CELL_GAP);
+      ctx.fillStyle = cellColor(m, m.data[i]);
+      ctx.fillRect(x, y, cell, cell);
+    }
+    m.painted = upto;
+  }
+
+  // Stepped with setTimeout against wall-clock progress, deliberately not
+  // requestAnimationFrame. A booth screen can end up with this tab not
+  // visible - a screensaver, a switched tab, a compositor that thinks the
+  // window is occluded - and Chrome throttles rAF in that state to the point
+  // where the grid simply stops half drawn and stays that way. setTimeout is
+  // throttled too, but it keeps firing, and because progress is computed from
+  // elapsed time rather than frame count a throttled tab jumps straight to a
+  // finished grid instead of a broken one.
+  function animate(m, ms, done) {
+    var gen = ++m.gen;
+    var t0 = now();
+    function step() {
+      var k;
+      if (m.gen !== gen) { return; }
+      k = Math.min(1, (now() - t0) / ms);
+      paint(m, Math.round(m.data.length * k));
+      if (k < 1) { setTimeout(step, 30); }
+      else if (done) { done(); }
+    }
+    step();
+  }
+
+  function markTamper() {
+    var m = mosaic.pq;
+    var cell, cols, ctx, x, y;
+    if (!m.canvas || !m.data || tamperOffset < 0 ||
+        tamperOffset >= m.data.length) { return; }
+    cell = m.cell;
+    cols = m.cols;
+    ctx = m.ctx;
+    x = (tamperOffset % cols) * (cell + CELL_GAP);
+    y = Math.floor(tamperOffset / cols) * (cell + CELL_GAP);
+    ctx.fillStyle = "#e5484d";
+    ctx.fillRect(x, y, cell, cell);
+    // A ring well outside the cell, otherwise one small square in 4627 is
+    // invisible from across a booth.
+    ctx.strokeStyle = "#ff6b70";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(x + cell / 2, y + cell / 2, cell * 2.8, 0, Math.PI * 2);
+    ctx.stroke();
+    $("m-pq-fig").classList.add("flash");
+    setTimeout(function () { $("m-pq-fig").classList.remove("flash"); }, 1400);
+  }
+
+  function showMosaic(which, bytes, doAnimate) {
+    var m = mosaic[which];
+    var lay;
+    m.canvas = $(CANVAS_ID[which]);
+    m.data = bytes;
+    m.painted = 0;
+    m.gen = (m.gen || 0) + 1;
+
+    if (which === "pq") {
+      lay = layout(bytes.length, pqAvailPx());
+      cellPx = lay.cell;
+      m.cols = lay.cols;
+      m.rows = lay.rows;
+    }
+    else {
+      // Squared off, so 64 bytes reads as a small block beside a full page.
+      m.cols = Math.ceil(Math.sqrt(bytes.length));
+      m.rows = Math.ceil(bytes.length / m.cols);
+    }
+    m.cell = cellPx;
+    if (which === "pq") {
+      m.ctx = sizeCanvasFluid(m.canvas, m.rows, m.cell);
+    }
+    else {
+      m.ctx = sizeCanvasFixed(m.canvas, m.cols, m.rows, m.cell);
+    }
+
+    if (!doAnimate) {
+      paint(m);
+      return;
+    }
+    // The signature arriving as a picture being drawn is what turns "4627
+    // bytes" from a number into a quantity.
+    animate(m, 900, function () {
+      if (which === "pq" && tamperOffset >= 0) { markTamper(); }
+    });
+  }
+
+  // Deliberately does not wipe the pixels. A run takes a couple of seconds,
+  // and blanking the grid for that whole time leaves the biggest panel on the
+  // screen empty for most of every cycle. The previous signature stays up
+  // until the new one starts painting over it, which also makes the point
+  // that each run produces a different one.
+  function resetMosaicState() {
+    tamperOffset = -1;
+    Object.keys(mosaic).forEach(function (k) {
+      mosaic[k].gen = (mosaic[k].gen || 0) + 1;
+    });
+    $("m-note").textContent = "All three grids are drawn at the same " +
+      "scale, and every cell is one byte of a signature this TPM just produced.";
+  }
+
+  function drawBars() {
+    var max = Math.max(pqBytes, c384Bytes, clBytes, 1);
+    $("pq-bar").style.width = (pqBytes / max * 100) + "%";
+    $("c384-bar").style.width = (c384Bytes / max * 100) + "%";
+    $("cl-bar").style.width = (clBytes / max * 100) + "%";
+    if (pqBytes) { $("pq-n").textContent = pqBytes.toLocaleString() + " B"; }
+    if (c384Bytes) { $("c384-n").textContent = c384Bytes.toLocaleString() + " B"; }
+    if (clBytes) { $("cl-n").textContent = clBytes.toLocaleString() + " B"; }
+    drawRatio();
+  }
+
+  // Both halves of the cost, in one sentence, against the algorithm most of
+  // the audience is actually using today. Size alone understates it - the
+  // signing time is the part that changes what a protocol can afford.
+  function drawRatio() {
+    if (!pqBytes || !clBytes) { return; }
+    var txt = "Post-quantum costs <b>" + Math.round(pqBytes / clBytes) +
+      "x the bytes</b>";
+    if (pqSignMs && clSignMs) {
+      txt += " and <b>" + (pqSignMs / clSignMs).toFixed(1) +
+        "x the signing time</b>";
+    }
+    txt += " of ECDSA P-256 &mdash; measured on this chip, on the same digest.";
+    $("ratio").innerHTML = txt;
+  }
+
+  function ms(v) {
+    return Math.round(v).toLocaleString() + " ms";
+  }
+
+  // The signature payload is several thousand characters. Showing it whole
+  // turns the log from evidence into a wall, so it is elided here only - the
+  // mosaic above is drawn from the full bytes.
+  function logLine(ev) {
+    var shown = ev, b64 = ev.b64;
+    if (typeof b64 === "string" && b64.length > 48) {
+      shown = {};
+      Object.keys(ev).forEach(function (k) { shown[k] = ev[k]; });
+      shown.b64 = b64.slice(0, 24) + "\u2026[" + b64.length + " chars]";
+    }
+    log(JSON.stringify(shown));
+  }
+
+  function log(line) {
+    var el = $("log");
+    el.textContent += line + "\n";
+    el.scrollTop = el.scrollHeight;
+  }
+
+  function onEvent(ev) {
+    if (ev.event !== "connected") logLine(ev);
+
+    switch (ev.event) {
+      case "connected":
+        $("conn-dot").classList.add("on");
+        break;
+
+      case "attract":
+        attractOn = !!ev.on;
+        if (ev.act) { showTab(ev.act === "sign" ? "sign" : ev.act, false); }
+        $("btn-attract").textContent = attractOn ? "Auto: on" : "Auto: off";
+        $("btn-attract").style.borderColor = attractOn ? "var(--accent)" : "";
+        break;
+
+      case "tpm.identity":
+        applyIdentity(ev);
+        break;
+
+      case "console":
+        consoleLine(ev.line);
+        break;
+
+      case "tpm.reset":
+        $("verdict").className = "verdict";
+        $("verdict-big").textContent = "Resetting TPM\u2026";
+        $("verdict-why").textContent =
+          "Pulsing the reset line on GPIO" + (ev.gpio || "4") + ".";
+        break;
+
+      case "tpm.recovered":
+        $("verdict").className = "verdict";
+        $("verdict-big").textContent =
+          ev.ok ? "TPM ready" : "TPM still not answering";
+        $("verdict-why").textContent = ev.ok
+          ? "The TPM was reset and answered again."
+          : "Check power, seating and chip select.";
+        break;
+
+      case "tls.begin":
+        tlsRun = true;
+        ["1", "2", "3", "4"].forEach(function (n) { tlsStep(n, null, ""); });
+        $("tls-verdict").className = "verdict";
+        $("tls-big").textContent = "Running\u2026";
+        $("tls-why").textContent = "ML-DSA-" + ev.mldsa + ", group " + ev.group + ".";
+        break;
+
+      case "tls.step":
+        tlsStep(ev.n, ev.state, ev.detail);
+        break;
+
+      case "tls.key":
+        tlsKey = ev;
+        break;
+
+      case "tls.handshake":
+        tlsHs = ev;
+        break;
+
+      case "tls.end":
+        $("tls-verdict").className = "verdict " + (ev.ok ? "pass" : "fail");
+        $("tls-big").textContent = ev.ok
+          ? "Post-quantum TLS established" : "Handshake did not complete";
+        $("tls-why").textContent = ev.ok
+          ? ((tlsHs ? tlsHs.cipher + ", key exchange " + tlsHs.group + ". " : "") +
+             "The server authenticated with an ML-DSA key" +
+             (tlsKey ? " created at handle " + tlsKey.handle : "") +
+             " that was generated inside the TPM and never left it.")
+          : "See the event stream.";
+        break;
+
+      case "pcr.begin":
+        pcrRun = true;
+        $("pcr-note").textContent = "Reading\u2026";
+        break;
+
+      case "pcr.table":
+        renderPcrs(ev);
+        break;
+
+      case "spdm.begin":
+        spdmRun = true;
+        // A build with no responder key pinned reads the key and stops. It
+        // passes its one check, which is not a session.
+        spdmDiscovery = ev.mode === "discovery";
+        $("spdm-steps").innerHTML = "";
+        $("spdm-verdict").className = "verdict";
+        $("spdm-big").textContent = "Running\u2026";
+        $("spdm-why").textContent = ev.on
+          ? "Negotiating a session with the fitted part, over the same bus the other acts use in clear."
+          : "Starting the firmware TPM responder and negotiating a session.";
+        if (ev.on) {
+          $("spdm-silicon").className = "verdict pass";
+          $("spdm-sil-big").textContent = "The fitted part speaks SPDM";
+          $("spdm-sil-why").textContent =
+            "The handshake below runs on the board against the TPM next to it. No host is involved.";
+          $("spdm-heading").textContent = "Secured session with the fitted TPM";
+        }
+        break;
+
+      case "spdm.silicon":
+        // Neutral, not red. This is the documented state of pre-production
+        // firmware, not a fault, and styling it as a failure would both
+        // misrepresent it and read badly on the vendor's own stand.
+        $("spdm-silicon").className = "verdict" +
+          (ev.provisionable ? " pass" : "");
+        $("spdm-sil-big").textContent = ev.provisionable
+          ? "The fitted part supports SPDM"
+          : "The fitted part: negotiation yes, provisioning not yet";
+        $("spdm-sil-why").textContent = ev.message || "";
+        break;
+
+      case "spdm.step":
+        spdmStep(ev);
+        break;
+
+      case "spdm.handshake":
+        spdmDetail(ev.n, ev.chain, "mono");
+        break;
+
+      case "spdm.session":
+        spdmDetail(ev.n, ev.cipher + " \u00b7 session " + ev.id, "secret");
+        break;
+
+      case "spdm.encrypted":
+        spdmDetail(4, ev.mfg + " firmware " + ev.fw + " \u00b7 read as ciphertext",
+          "secret");
+        break;
+
+      case "spdm.results":
+        $("spdm-verdict").className = "verdict" +
+          (ev.failed !== 0 ? " fail" : spdmDiscovery ? "" : " pass");
+        $("spdm-big").textContent = ev.failed !== 0
+          ? ev.failed + " of " + ev.total + " checks failed"
+          : spdmDiscovery
+            ? "Responder key read \u2014 no session"
+            : "Encrypted channel established";
+        $("spdm-why").textContent = ev.failed !== 0
+          ? "See the event stream."
+          : spdmDiscovery
+            ? ("This build has no responder key pinned, so the act stopped " +
+               "after reading the key out of the part. Nothing was " +
+               "encrypted. Rebuild with SPDM_RSP_PUBKEY set to the key in " +
+               "the event stream to negotiate a session.")
+            : ("All " + ev.total + " checks passed" +
+               (ev.units ? ", including " + ev.units +
+                  " wolfTPM unit tests run inside the encrypted session" : "") +
+               ". Every command inside the session crossed the bus as ciphertext.");
+        break;
+
+      case "seal.begin":
+        sealRun = true;
+        resetSealSteps();
+        setSealStep("reset", "active", "");
+        break;
+
+      case "seal.reset":
+        setSealStep("reset", "done", shortDigest(ev.digest), "mono");
+        setSealStep("create", "active", "");
+        break;
+
+      case "seal.create":
+        setSealStep("create", ev.ok ? "done" : "bad",
+          ev.ok ? (ev.pub_bytes + ev.priv_bytes) + " B blob" : "failed");
+        setSealStep("before", "active", "");
+        break;
+
+      case "seal.unseal":
+        if (ev.stage === "before") {
+          setSealStep("before", ev.ok ? "done" : "bad",
+            ev.ok ? "\u201c" + ev.secret + "\u201d" : "refused",
+            ev.ok ? "secret" : "");
+          setSealStep("extend", "active", "");
+        }
+        else {
+          // Refusing is the correct outcome, so it is marked done. Marking it
+          // red made a passing run read as two failures.
+          setSealStep("after", ev.ok ? "bad" : "done",
+            ev.ok ? "released anyway - WRONG" : (ev.rc_name || "refused"));
+        }
+        break;
+
+      case "seal.extend":
+        // Amber, not red: changing the measurement is something we did on
+        // purpose, not a fault.
+        setSealStep("extend", "active", shortDigest(ev.digest), "mono");
+        break;
+
+      case "seal.end":
+        $("seal-verdict").className = "verdict " + (ev.pass ? "pass" : "fail");
+        $("seal-big").textContent = ev.pass
+          ? "Secret withheld" : "Unexpected result";
+        $("seal-why").textContent = ev.pass
+          ? "Same sealed blob, same chip, same command. The only thing that changed was the measured state, and that was enough for the TPM to refuse."
+          : "The sequence did not behave as expected \u2014 see the event stream.";
+        break;
+
+      case "ek.begin":
+        ekRun = true;
+        ekSeen = [];
+        $("ek-rows").innerHTML = "";
+        $("ek-chain").textContent = "";
+        $("ek-summary").textContent = "Reading endorsement certificates\u2026";
+        break;
+
+      case "ek.cert":
+        addEkRow(ev);
+        break;
+
+      case "ek.end":
+        finishEk(ev.count);
+        break;
+
+      case "run.start":
+        running = true;
+        setIdle(false);
+        tampered = !!ev.tamper;
+        if (ev.param_set) {
+          runParamSet = ev.param_set;
+          if ($("param-set")) { $("param-set").value = String(runParamSet); }
+        }
+        setButtons();
+        resetSteps();
+        break;
+
+      case "tpm.startup":
+        setStep("startup", "done", "");
+        setStep("key", "active", "");
+        break;
+
+      case "key.create":
+        setStep("key", "done", Math.round(ev.ms) + " ms");
+        setStep("sign", "active", "");
+        $("c-pq-kg").textContent = ms(ev.ms);
+        break;
+
+      case "sign.digest":
+        pqBytes = ev.sig_bytes;
+        pqSignMs = ev.ms;
+        setStep("sign", "done", ev.sig_bytes.toLocaleString() + " B \u00b7 " +
+          Math.round(ev.ms) + " ms");
+        setStep("verify", "active", "");
+        $("c-pq-set").textContent = ev.param_set || runParamSet;
+        $("pq-label").textContent = "ML-DSA-" + runParamSet + " signature";
+        $("c-pq-sz").textContent = ev.sig_bytes.toLocaleString() + " B";
+        $("c-pq-sg").textContent = ms(ev.ms);
+        drawBars();
+        break;
+
+      case "sign.bytes":
+        $("m-pq-title").textContent = "ML-DSA-" + runParamSet;
+        $("m-pq-n").textContent = ev.bytes.toLocaleString() + " cells";
+        showMosaic("pq", b64ToBytes(ev.b64), true);
+        break;
+
+      case "compare.bytes":
+        if (ev.alg === "ECDSA_P384") {
+          $("m-384-n").textContent = ev.bytes.toLocaleString() + " cells";
+          showMosaic("c384", b64ToBytes(ev.b64), false);
+        }
+        else {
+          $("m-cl-n").textContent = ev.bytes.toLocaleString() + " cells";
+          showMosaic("cl", b64ToBytes(ev.b64), false);
+        }
+        break;
+
+      case "tamper":
+        setStep("tamper", "bad", "offset " + ev.offset);
+        // The signature was emitted before the flip, so the mosaic shows the
+        // genuine bytes and this marks the one cell that changed.
+        tamperOffset = ev.offset;
+        if (mosaic.pq.data) {
+          if (mosaic.pq.painted >= mosaic.pq.data.length) { markTamper(); }
+          $("m-note").innerHTML = "One bit was flipped in <b>one</b> of these " +
+            mosaic.pq.data.length.toLocaleString() + " bytes. That is 1 bit in " +
+            (mosaic.pq.data.length * 8).toLocaleString() +
+            ", and it is enough to invalidate the whole signature.";
+        }
+        break;
+
+      case "verify.host":
+        var ok = ev.result === "valid";
+        setStep("verify", ok ? "done" : "bad", ev.ms.toFixed(2) + " ms");
+        $("verify-note").textContent = ok
+          ? "Verified in software by wolfCrypt from the public key alone — the private key never left the TPM."
+          : "wolfCrypt rejected the signature.";
+        break;
+
+      case "compare.classical":
+        if (ev.alg === "ECDSA_P384") {
+          c384Bytes = ev.sig_bytes;
+          $("c-384-sz").textContent = ev.sig_bytes.toLocaleString() + " B";
+          $("c-384-kg").textContent = ms(ev.keygen_ms);
+          $("c-384-sg").textContent = ms(ev.sign_ms);
+        }
+        else {
+          clBytes = ev.sig_bytes;
+          clSignMs = ev.sign_ms;
+          $("c-256-sz").textContent = ev.sig_bytes.toLocaleString() + " B";
+          $("c-256-kg").textContent = ms(ev.keygen_ms);
+          $("c-256-sg").textContent = ms(ev.sign_ms);
+        }
+        drawBars();
+        break;
+
+      case "result":
+        var v = $("verdict");
+        if (ev.pass && !tampered) {
+          v.className = "verdict pass";
+          $("verdict-big").textContent = "Signature valid";
+          $("verdict-why").textContent =
+            "The TPM produced a post-quantum ML-DSA signature and wolfCrypt verified it independently.";
+        } else if (ev.pass && tampered) {
+          v.className = "verdict pass";
+          $("verdict-big").textContent = "Tampering detected";
+          $("verdict-why").textContent =
+            "One bit was flipped in the signature and wolfCrypt rejected it, exactly as it must.";
+        } else {
+          v.className = "verdict fail";
+          $("verdict-big").textContent = "Unexpected result";
+          $("verdict-why").textContent = "Verification did not match expectation — see the event stream.";
+        }
+        break;
+
+      case "run.end":
+        running = false;
+        setIdle(true);
+        setButtons();
+        break;
+
+      case "error":
+        running = false;
+        setButtons();
+        $("verdict").className = "verdict fail";
+        $("verdict-big").textContent = "Error";
+        $("verdict-why").textContent = ev.message || "";
+        break;
+    }
+  }
+
+  // ---- Tabs ----------------------------------------------------------
+  // Panels used to stack, so pressing a button filled something below the
+  // fold and nothing appeared to happen. Each act now owns a tab, and the
+  // attract loop switches tabs as it goes.
+  var VIEWS = { sign: "view-sign", seal: "view-seal", ek: "view-ek",
+                pcr: "view-pcr", spdm: "view-spdm",
+                tls: "view-tls", console: "view-console" };
+  var sealRun = false, ekRun = false, spdmRun = false, pcrRun = false,
+      tlsRun = false, spdmDiscovery = false;
+
+  function showTab(name, autoRun) {
+    var k;
+    if (!VIEWS[name]) { return; }
+    for (k in VIEWS) {
+      if (VIEWS.hasOwnProperty(k)) { $(VIEWS[k]).hidden = (k !== name); }
+    }
+    Array.prototype.forEach.call(
+      document.querySelectorAll(".tab[data-tab]"), function (b) {
+        b.classList.toggle("active", b.getAttribute("data-tab") === name);
+      });
+    // Opening an empty tab and seeing nothing is the same dead end as before,
+    // so fill it on first view. Only on a real click - the attract loop runs
+    // the act itself and must not be double-fired.
+    if (autoRun && name === "seal" && !sealRun) { startSeal(); }
+    if (autoRun && name === "ek" && !ekRun) { startEk(); }
+    if (autoRun && name === "spdm" && !spdmRun) { startSpdm(); }
+    if (autoRun && name === "pcr" && !pcrRun) { startPcr("read"); }
+    if (autoRun && name === "tls" && !tlsRun) { startTls(); }
+  }
+
+  function startSeal() {
+    sealRun = true;
+    fetch("/api/seal", { method: "POST" })
+      .catch(function (e) { log("seal request failed: " + e); });
+  }
+
+  function startTls() {
+    tlsRun = true;
+    fetch("/api/tls", { method: "POST" })
+      .catch(function (e) { log("tls request failed: " + e); });
+  }
+
+  function startPcr(action) {
+    pcrRun = true;
+    fetch("/api/pcr", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: action })
+    }).catch(function (e) { log("pcr request failed: " + e); });
+  }
+
+  function startSpdm() {
+    spdmRun = true;
+    fetch("/api/spdm", { method: "POST" })
+      .catch(function (e) { log("spdm request failed: " + e); });
+  }
+
+  function startEk() {
+    ekRun = true;
+    fetch("/api/ekcerts", { method: "POST" })
+      .catch(function (e) { log("ek request failed: " + e); });
+  }
+
+  // ---- Post-quantum TLS -------------------------------------------------
+  var tlsKey = null, tlsHs = null;
+
+  function tlsStep(n, state, detail) {
+    var li = document.querySelector('#tls-steps li[data-n="' + n + '"]');
+    var d;
+    if (!li) { return; }
+    li.classList.remove("active", "done", "bad");
+    if (state === "running") { li.classList.add("active"); }
+    else if (state === "pass") { li.classList.add("done"); }
+    else if (state === "fail") { li.classList.add("bad"); }
+    d = li.querySelector(".detail");
+    d.textContent = detail === undefined ? "" : detail;
+  }
+
+  // ---- Measured boot ---------------------------------------------------
+  function renderPcrs(ev) {
+    var grid = $("pcr-grid"), set = 0, drtm = 0, i, p, cell, idx, dig;
+    grid.innerHTML = "";
+    for (i = 0; i < ev.pcrs.length; i++) {
+      p = ev.pcrs[i];
+      cell = document.createElement("div");
+      cell.className = "pcrcell";
+      // Three distinct states, and conflating them misleads. All zero means
+      // never extended. All ff is a DRTM register (17-22), which the TPM
+      // initialises to ones and which only locality 4 can reset - it is not
+      // a measurement. Anything else genuinely holds one.
+      if (/^f+$/i.test(p.digest || "")) {
+        cell.classList.add("drtm");
+        drtm++;
+      }
+      else if (/[^0]/.test(p.digest || "")) {
+        cell.classList.add("set");
+        set++;
+      }
+      if (p.index === ev.touched) { cell.classList.add("hit"); }
+      idx = document.createElement("span");
+      idx.className = "i";
+      idx.textContent = "PCR " + p.index;
+      dig = document.createElement("span");
+      dig.className = "d";
+      dig.textContent = p.digest
+        ? p.digest.slice(0, 24).toLowerCase() + "\u2026" : "unreadable";
+      cell.appendChild(idx);
+      cell.appendChild(dig);
+      grid.appendChild(cell);
+    }
+
+    $("pcr-banks").innerHTML = (ev.banks || []).length
+      ? "Banks on this part: " + ev.banks.map(function (b) {
+          return "<b>" + b.name + "</b> " +
+            (b.allocated ? "allocated" : "present but not allocated");
+        }).join(", ") + ". A TPM can only have a limited number allocated at " +
+        "once, and switching needs TPM2_PCR_Allocate and a reset."
+      : "";
+
+    $("pcr-note").innerHTML =
+      (set ? "<b>" + set + "</b> of " + ev.pcrs.length +
+             " registers hold a measurement. "
+           : "No register holds a measurement yet. ") +
+      (drtm ? "<b>" + drtm + "</b> read as all ones: those are the " +
+              "dynamic root-of-trust registers, which the TPM initialises to " +
+              "ones and only locality 4 can reset, so they are unavailable " +
+              "here rather than measured. "
+            : "") +
+      "The rest read as all zero, meaning they have never been extended.";
+  }
+
+  // ---- SPDM ------------------------------------------------------------
+  function spdmStep(ev) {
+    var li = document.querySelector('#spdm-steps li[data-n="' + ev.n + '"]');
+    var mark, body, det;
+    if (!li) {
+      li = document.createElement("li");
+      li.setAttribute("data-n", ev.n);
+      mark = document.createElement("span");
+      mark.className = "mark";
+      mark.textContent = ev.n;
+      body = document.createElement("span");
+      body.className = "label";
+      det = document.createElement("span");
+      det.className = "detail";
+      li.appendChild(mark);
+      li.appendChild(body);
+      li.appendChild(det);
+      $("spdm-steps").appendChild(li);
+    }
+    // The board names a step in "detail" and the host path in "title", and
+    // the text that arrives with "pass" reads better than the one that came
+    // with "running", so a later name replaces an earlier one.
+    body = li.querySelector(".label");
+    if (body && (ev.title || ev.detail)) {
+      body.textContent = ev.title || ev.detail;
+    }
+    li.classList.remove("active", "done", "bad");
+    if (ev.state === "running") { li.classList.add("active"); }
+    else if (ev.state === "pass") { li.classList.add("done"); }
+    else if (ev.state === "fail") { li.classList.add("bad"); }
+  }
+
+  function spdmDetail(n, text, cls) {
+    var li = document.querySelector('#spdm-steps li[data-n="' + n + '"]');
+    var d;
+    if (!li) { return; }
+    d = li.querySelector(".detail");
+    d.className = "detail" + (cls ? " " + cls : "");
+    d.textContent = text;
+  }
+
+  // ---- Sealed secret -------------------------------------------------
+  function setSealStep(key, state, detail, cls) {
+    var li = document.querySelector('#seal-steps li[data-k="' + key + '"]');
+    var d;
+    if (!li) { return; }
+    li.classList.remove("active", "done", "bad");
+    if (state) { li.classList.add(state); }
+    d = li.querySelector(".detail");
+    d.className = "detail" + (cls ? " " + cls : "");
+    d.textContent = detail === undefined ? "" : detail;
+  }
+
+  function shortDigest(hex) {
+    if (!hex) { return ""; }
+    return hex.slice(0, 16).toLowerCase() + "\u2026";
+  }
+
+  function resetSealSteps() {
+    ["reset", "create", "before", "extend", "after"].forEach(function (k) {
+      setSealStep(k, null, "");
+    });
+    $("seal-verdict").className = "verdict";
+    $("seal-big").textContent = "Running\u2026";
+    $("seal-why").textContent = "Talking to the TPM.";
+  }
+
+  // ---- Endorsement certificates -------------------------------------
+  // The TCG subject-alt-name fields are the point of this panel: the
+  // manufacturer, model and firmware version are asserted by the issuing CA,
+  // not by the chip describing itself. tpmManufacturer is hex ASCII.
+  function decodeMfg(v) {
+    var hex = String(v || "").replace(/^id:/, ""), out = "", i, c;
+    if (!/^[0-9a-fA-F]+$/.test(hex) || hex.length % 2) { return v; }
+    for (i = 0; i < hex.length; i += 2) {
+      c = parseInt(hex.substr(i, 2), 16);
+      if (c >= 0x20 && c < 0x7f) { out += String.fromCharCode(c); }
+    }
+    return out ? out + " (" + v + ")" : v;
+  }
+
+  // Certificate fields are whatever the issuer put in them, and the EK
+  // summary is the one place they reach innerHTML rather than textContent.
+  function esc(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  function ekKeyText(ev) {
+    if (ev.alg === "RSA") { return "RSA-" + (ev.bits || "?"); }
+    return "ECC " + (ev.curve || "?");
+  }
+
+  function addEkRow(ev) {
+    var tr = document.createElement("tr");
+    function cell(text, cls) {
+      var td = document.createElement("td");
+      td.textContent = text;
+      if (cls) { td.className = cls; }
+      tr.appendChild(td);
+    }
+    cell(ev.handle);
+    cell(ekKeyText(ev));
+    cell(ev.hash || "\u2014");
+    cell((ev.cert_bytes || 0).toLocaleString() + " B");
+    cell(ev.serial || "\u2014");
+    // Absent means not checked, which is not the same as checked and failed.
+    cell(ev.key_match === undefined ? "\u2014" : (ev.key_match ? "yes" : "NO"),
+         ev.key_match ? "ok" : "");
+    cell(ev.issuer_cn || "\u2014", "issuer");
+    $("ek-rows").appendChild(tr);
+    ekSeen.push(ev);
+  }
+
+  function finishEk(count) {
+    var first = ekSeen[0] || {}, san = first.san || {};
+    var untrusted = ekSeen.filter(function (e) {
+      return e.chain !== "trusted";
+    }).length;
+
+    // The board reports the certificates it finds without decoding them, so
+    // there is no manufacturer or model to quote. Say what is actually known
+    // rather than printing an empty field.
+    var decoded = !!san.manufacturer;
+    $("ek-summary").innerHTML = !count
+      ? "No endorsement certificates found."
+      : decoded
+        ? "<b>" + count + " certificates</b> read from the TPM's own NV storage. " +
+          "Each one was written at manufacture and states, signed by the issuer, " +
+          "that this is a <b>" + esc(san.model || "TPM") + "</b> from <b>" +
+          esc(decodeMfg(san.manufacturer)) + "</b>, firmware " +
+          esc(san.version || "unknown") + "."
+        : "<b>" + count + " certificates</b> read from the TPM's own NV storage, " +
+          "each written there at manufacture and signed by the issuer.";
+
+    var matched = ekSeen.length && ekSeen.every(function (e) {
+      return e.key_match;
+    });
+    $("ek-chain").innerHTML = !decoded
+      ? ""
+      : untrusted
+      ? "Every certificate parsed" + (matched
+          ? ", and in every case the public key in the certificate matches " +
+            "the key the TPM derived just now &mdash; the chip is provably " +
+            "the one the certificate was issued to"
+          : "") +
+        ". The chain is reported as untrusted because these are issued by " +
+        "Infineon's <b>test</b> CA, which is expected for a pre-production " +
+        "sample and is deliberately absent from the production trust store."
+      : "Chains verified against the bundled production roots.";
+  }
+
+  function setIdle(idle) {
+    $("claim").classList.toggle("idle", !!idle);
+  }
+
+  function setButtons() {
+    $("btn-run").disabled = running;
+    $("btn-tamper").disabled = running;
+    $("btn-reset").disabled = running;
+    var sel = $("param-set");
+    if (sel) sel.disabled = running;
+  }
+
+  function run(tamper) {
+    if (running) return;
+    fetch("/api/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        param_set: currentParamSet(),
+        tamper: tamper,
+        compare: true
+      })
+    }).catch(function (e) { log("request failed: " + e); });
+  }
+
+  function currentParamSet() {
+    var sel = $("param-set");
+    return sel ? parseInt(sel.value, 10) : paramSets[0];
+  }
+
+  function updatePqLabel() {
+    $("pq-label").textContent = "ML-DSA-" + currentParamSet() + " signature";
+  }
+
+  // The parameter control is built from what the fitted part can actually be
+  // asked for, never hardcoded. The server owns that list and enforces it in
+  // api_run as well, because a browser tab left open from a session with a
+  // different part fitted could otherwise still POST a set this one cannot do.
+  function applyIdentity(ident) {
+    if (ident.label) $("tpm-id").textContent = ident.label;
+    paramSets = (ident.param_sets && ident.param_sets.length)
+      ? ident.param_sets : [87];
+
+    var wrap = $("param-wrap");
+    if (paramSets.length === 1) {
+      // One option is not a choice - render it as a label so there is
+      // nothing to mis-click.
+      wrap.innerHTML = '<span class="chip">ML-DSA-' + paramSets[0] + '</span>';
+    } else {
+      var html = '<select id="param-set">';
+      paramSets.forEach(function (n, i) {
+        html += '<option value="' + n + '"' + (i === 0 ? ' selected' : '') +
+          '>ML-DSA-' + n + '</option>';
+      });
+      wrap.innerHTML = html + '</select>';
+      $("param-set").addEventListener("change", updatePqLabel);
+    }
+    updatePqLabel();
+    setButtons();
+  }
+
+  function consoleLine(text) {
+    var el = $("console-log");
+    if (!el) { return; }
+    // The debug probe resets the part more than once per reset request, so
+    // the banner can appear several times. Start again on the last one, and
+    // drop the fragment the reset cut in half.
+    var at = text.lastIndexOf("wolfBoot HAL Init");
+    if (at >= 0) {
+      el.textContent = "";
+      text = text.slice(at);
+    }
+    el.textContent += text + "\n";
+    // A booth runs for hours; keep the tail rather than the whole day.
+    if (el.textContent.length > 20000) {
+      el.textContent = el.textContent.slice(-16000);
+    }
+    el.scrollTop = el.scrollHeight;
+  }
+
+  $("btn-reset-board").addEventListener("click", function () {
+    if (running) { return; }
+    $("console-log").textContent += "\n--- resetting ---\n";
+    fetch("/api/reset", { method: "POST" })
+      .catch(function (e) { consoleLine("reset request failed: " + e); });
+  });
+
+  $("btn-reset").addEventListener("click", function () {
+    if (running) return;
+    fetch("/api/reset", { method: "POST" })
+      .catch(function (e) { log("reset request failed: " + e); });
+  });
+
+  $("btn-attract").addEventListener("click", function () {
+    fetch("/api/attract", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ on: !attractOn })
+    }).catch(function (e) { log("attract request failed: " + e); });
+  });
+
+  $("btn-seal").addEventListener("click", startSeal);
+
+  $("btn-ek").addEventListener("click", startEk);
+  $("btn-spdm").addEventListener("click", startSpdm);
+  $("btn-tls").addEventListener("click", startTls);
+  $("btn-pcr").addEventListener("click", function () { startPcr("read"); });
+  $("btn-pcr-extend").addEventListener("click", function () { startPcr("extend"); });
+  $("btn-pcr-reset").addEventListener("click", function () { startPcr("reset"); });
+
+  Array.prototype.forEach.call(
+    document.querySelectorAll(".tab[data-tab]"), function (b) {
+      b.addEventListener("click", function () {
+        showTab(b.getAttribute("data-tab"), true);
+        // Choosing a tab counts as interaction, or the loop advances and
+        // switches away from what the visitor just picked.
+        fetch("/api/touch", { method: "POST" }).catch(function () {});
+      });
+    });
+
+  $("btn-run").addEventListener("click", function () { run(false); });
+  $("btn-tamper").addEventListener("click", function () { run(true); });
+
+  // Reconnecting event source: a booth screen must survive a server restart
+  // without anyone touching a keyboard.
+  function connect() {
+    var es = new EventSource("/api/stream");
+    es.onmessage = function (m) {
+      try { onEvent(JSON.parse(m.data)); } catch (e) { /* ignore */ }
+    };
+    es.onerror = function () {
+      $("conn-dot").classList.remove("on");
+      es.close();
+      setTimeout(connect, 2000);
+    };
+  }
+  fetch("/api/tpm").then(function (r) { return r.json(); })
+    .then(applyIdentity)
+    .catch(function () { /* the event stream will deliver it */ });
+  connect();
+  drawBars();
+})();
+</script>
+</body>
+</html>
