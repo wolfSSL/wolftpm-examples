@@ -20,6 +20,14 @@ Build steps:
 * `make program`
 * See [wolfTPM Firmware Example](https://github.com/wolfSSL/wolfTPM/tree/master/examples/firmware) for next steps
 
+## Infineon PSOC Control C3 On-Board TPM Demo
+
+See [Infineon/PSoC_Control_C3_Onboard_Demo](/Infineon/PSoC_Control_C3_Onboard_Demo).
+
+Runs the whole demonstration on the microcontroller: the MCU drives a TPM 2.0 over I2C and performs post-quantum signing, a sealed secret bound to a measurement, PCR and endorsement certificate reads, and an SPDM session, with no host involved in any of it. A browser front end in [host](/Infineon/PSoC_Control_C3_Onboard_Demo/host) renders what the board reports.
+
+Needs the wolfBoot PSOC Control C3 target: https://github.com/wolfSSL/wolfBoot/pull/915
+
 ## STM32H5 Firmware TPM (fwTPM) Port
 
 See [STM32/fwtpm-stm32h5](STM32/fwtpm-stm32h5).
