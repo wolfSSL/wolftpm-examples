@@ -1,0 +1,25 @@
+tpm_identity.elf
+tpm_identity.bin
+tpm_identity.ld
+tpm_identity.map
+mldsa_onboard.elf
+mldsa_onboard.bin
+mldsa_onboard.ld
+mldsa_onboard.map
+demo_acts.elf
+demo_acts.bin
+demo_acts.ld
+demo_acts.map
+spdm_acts.elf
+spdm_acts.bin
+spdm_acts.ld
+spdm_acts.map
+__pycache__/
+*.pyc
+host/server.pid
+factory.bin
+spdm_acts_v*_signed.bin
+
+# The repository root ignores *.cmd for kernel build artifacts, which would
+# otherwise swallow the launcher the Windows instructions tell people to run.
+!host/start-demo.cmd
