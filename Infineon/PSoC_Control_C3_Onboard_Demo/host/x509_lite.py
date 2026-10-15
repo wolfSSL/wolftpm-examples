@@ -199,8 +199,9 @@ def _parse(der):
                     kv = memoryview(key)
                     _t2, rs, re2, _n2 = _tlv(kv, 0)
                     mod_s, mod_e = list(_children(kv, rs, re2))[0][1:3]
-                    out["bits"] = len(
-                        bytes(kv[mod_s:mod_e]).lstrip(b"\x00")) * 8
+                    modulus = bytes(kv[mod_s:mod_e]).lstrip(b"\x00")
+                    out["rsa_modulus"] = modulus
+                    out["bits"] = len(modulus) * 8
                 except (_Err, IndexError):
                     pass
         i += 1

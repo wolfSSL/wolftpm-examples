@@ -797,8 +797,23 @@ def ek_record_from_der(ev, pubkeys=None):
     # key, and reporting an unproven match as "NO" would say the opposite of
     # what is true.
     pub = (pubkeys or {}).get(str(rec.get("handle", "")).lower())
-    if pub is not None and info.get("pubkey"):
-        rec["key_match"] = (info["pubkey"] == pub)
+    if pub is not None:
+        if pub[0] == "rsa" and info.get("alg") == "RSA":
+            cert_pub = info.get("rsa_modulus")
+            if cert_pub:
+                rec["key_match"] = (cert_pub.lstrip(b"\x00") ==
+                                    pub[1].lstrip(b"\x00"))
+        elif pub[0] == "ecc" and info.get("alg") == "ECC":
+            # Compare the coordinates as numbers, not as the encoded point:
+            # a leading zero byte is present or absent depending on the
+            # value, so two encodings of the same key differ in length.
+            cert_pub = info.get("pubkey", b"")
+            if cert_pub[:1] == b"\x04" and (len(cert_pub) - 1) % 2 == 0:
+                half = (len(cert_pub) - 1) // 2
+                cert_x = cert_pub[1:1 + half].lstrip(b"\x00")
+                cert_y = cert_pub[1 + half:].lstrip(b"\x00")
+                rec["key_match"] = (cert_x == pub[1].lstrip(b"\x00") and
+                                    cert_y == pub[2].lstrip(b"\x00"))
     return rec
 
 
@@ -812,15 +827,18 @@ class OnboardEkCerts(object):
     def __call__(self, ev):
         name = ev.get("event")
         if name == "ek.pub":
-            # The endorsement key the TPM derived just now, as the
-            # uncompressed point a certificate carries, so the two can be
-            # compared byte for byte.
+            # The endorsement key the TPM just derived for this certificate.
+            # Kept in its own shape per algorithm rather than as an encoded
+            # point, because an RSA key has no point to encode.
             try:
-                point = (b"\x04" + bytes.fromhex(ev.get("x", ""))
-                         + bytes.fromhex(ev.get("y", "")))
+                if ev.get("kind") == "rsa":
+                    pubkey = ("rsa", bytes.fromhex(ev.get("modulus", "")))
+                else:
+                    pubkey = ("ecc", bytes.fromhex(ev.get("x", "")),
+                              bytes.fromhex(ev.get("y", "")))
             except ValueError:
                 return None
-            self.pubkeys[str(ev.get("index", "")).lower()] = point
+            self.pubkeys[str(ev.get("index", "")).lower()] = pubkey
             return None
         if name == "ek.cert":
             self.count += 1
@@ -1714,13 +1732,22 @@ def _pcr_digest(text):
     return m.group(1) if m is not None else ""
 
 
-def run_seal_demo():
+def run_seal_demo(mode="deny"):
     """Seal a secret to the current measurement, release it, change the
-    measurement, and watch the same TPM refuse the same blob."""
-    if onboard_run("seal"):
+    measurement, and watch the same TPM refuse the same blob.
+
+    Access mode stops after the release, so the two halves can be shown one
+    at a time. The host fallback has no such split and runs the whole thing
+    either way; only the board path takes the shorter act.
+    """
+    if onboard_run("seal_access" if mode == "access" else "seal"):
         return
+    # Report the half this path actually runs, so the verdict and the flow
+    # agree rather than claiming a release the sequence went on to deny.
+    mode = "deny"
     idx = SEAL_PCR_INDEX
-    broadcast({"event": "seal.begin", "pcr": int(idx), "secret": SEAL_SECRET})
+    broadcast({"event": "seal.begin", "pcr": int(idx), "secret": SEAL_SECRET,
+               "mode": mode})
     if not os.path.exists(SEAL_PCR):
         broadcast({"event": "error",
                    "message": "seal_pcr not built in %s" % TPM_BUILD_DIR})
@@ -1793,7 +1820,13 @@ def run_seal_demo():
 @APP.route("/api/seal", methods=["POST"])
 def api_seal():
     touch()
-    threading.Thread(target=run_seal_demo, daemon=True).start()
+    body = request.get_json(silent=True) or {}
+    mode = body.get("mode", "deny")
+    if mode not in ("access", "deny"):
+        return jsonify({"ok": False,
+                        "error": "mode must be access or deny"}), 400
+    threading.Thread(target=run_seal_demo, args=(mode,),
+                     daemon=True).start()
     return jsonify({"ok": True})
 
 

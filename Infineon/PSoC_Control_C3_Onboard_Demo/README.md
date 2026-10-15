@@ -89,6 +89,7 @@ rather than something that spawns programs and parses their output.
 | `S` | as `s`, with ML-DSA-65 instead of 87 |
 | `T` | as `t`, with ML-DSA-65 instead of 87 |
 | `l` | sealed secret: seal to a PCR, unseal, extend, fail, reset |
+| `o` | as `l`, stopping after the matching unseal |
 | `e` | endorsement: read the EK certificates out of NV |
 | `d` | SPDM: negotiate an encrypted session with the part, only in the `spdm` build below |
 | `k` | report the public key of the TPM-held TLS identity |

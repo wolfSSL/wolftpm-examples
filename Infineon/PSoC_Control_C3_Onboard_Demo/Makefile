@@ -47,13 +47,14 @@ clean: tpm-clean onboard-clean acts-clean spdm-clean factory-clean
 # ---------------------------------------------------------------------------
 WOLFTPM_DIR ?= $(HOME)/wolfTPM
 TPM_DEFS = -DTARGET_psoc_c3 -DWOLFBOOT_TPM_I2C -DWOLFSSL_USER_SETTINGS \
+           -DWOLFTPM_SLB9678 \
            -DWOLFTPM_USER_SETTINGS \
            -DPSOC_C3_UART_SCB=3 -DPSOC_C3_UART_PORT=6 \
            -DPSOC_C3_UART_PCLK_GR=4 -DPSOC_C3_UART_PCLK_IDX=6 \
            -DPSOC_C3_PCLK_HZ=48000000 \
            -DPSOC_C3_I2C_SCB=0 -DPSOC_C3_I2C_PORT=9 \
            -DPSOC_C3_I2C_SCL_PIN=0 -DPSOC_C3_I2C_SDA_PIN=2 \
-           -DPSOC_C3_I2C_HSIOM_SEL=15 -DPSOC_C3_I2C_HZ=100000
+           -DPSOC_C3_I2C_HSIOM_SEL=15 -DPSOC_C3_I2C_HZ=1000000
 
 TPM_CFLAGS = -mcpu=cortex-m33 -mthumb -Os -Wall \
              -ffreestanding -ffunction-sections -fdata-sections -fno-common \
@@ -189,7 +190,7 @@ endif
 
 SPDM_DEFS = -DWOLFTPM_SPDM -DWOLFTPM_SPDM_TCG -DWOLFSPDM_INFINEON=1 \
             -DAPP_NEED_RNG -DAPP_HEAP_SIZE=24576 \
-            -DWOLFSSL_SHA384 -DWOLFSSL_SHA512 -DHAVE_ECC384 \
+            -DWOLFSSL_SHA384 -DWOLFSSL_SHA512 -DHAVE_ECC384 -DHAVE_ECC521 \
             -DWOLFSSL_SP_384 -DHAVE_AESGCM -DHAVE_AES_DECRYPT \
             -DHAVE_ECC_DHE -DHAVE_ECC_SIGN -DHAVE_ECC_VERIFY \
             -DHAVE_ECC_KEY_EXPORT -DHAVE_ECC_KEY_IMPORT -DWOLFSSL_KEY_GEN \

@@ -47,8 +47,27 @@
 #ifndef TPM_I2C_GUARD_LOOPS
 #define TPM_I2C_GUARD_LOOPS 20000
 #endif
+/* TIS FIFO registers. A signature leaves the part through these, so timing
+ * reads of them separates transport from compute; everything else on the
+ * bus is status polling that overlaps the part working. */
+#define TPM_I2C_DATA_FIFO   0x24u
+#define TPM_I2C_XDATA_FIFO  0x83u
 
 static int i2c_ready;
+static uint32_t measure_cycles;
+static int measure_active;
+
+void tpm_i2c_measure_begin(void)
+{
+    measure_cycles = 0;
+    measure_active = 1;
+}
+
+uint32_t tpm_i2c_measure_end_ms(void)
+{
+    measure_active = 0;
+    return measure_cycles / (CPU_HZ / 1000UL);
+}
 
 static void tpm_i2c_guard(void)
 {
@@ -134,7 +153,7 @@ int TPM2_IoCb(TPM2_CTX* ctx, INT32 isRead, UINT32 addr, BYTE* buf,
 {
     uint8_t reg = (uint8_t)(addr & 0xFF);
     uint8_t used = 0;
-    uint32_t start;
+    uint32_t start, elapsed;
     int ret;
 
     (void)ctx;
@@ -152,8 +171,13 @@ int TPM2_IoCb(TPM2_CTX* ctx, INT32 isRead, UINT32 addr, BYTE* buf,
     else
         ret = tpm_i2c_write(reg, buf, (uint32_t)size, &used);
 
+    elapsed = demo_cycles() - start;
+    if (measure_active && isRead &&
+            (reg == TPM_I2C_DATA_FIFO || reg == TPM_I2C_XDATA_FIFO))
+        measure_cycles += elapsed;
+
     i2c_trace_add(reg, (uint8_t)(isRead != 0), (uint8_t)(ret & 0xFF), used,
-        (size > 0) ? buf[0] : 0, size, demo_cycles() - start);
+        (size > 0) ? buf[0] : 0, size, elapsed);
 
     return (ret == I2C_OK) ? TPM_RC_SUCCESS : TPM_RC_FAILURE;
 }

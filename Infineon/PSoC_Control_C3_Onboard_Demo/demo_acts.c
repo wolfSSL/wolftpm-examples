@@ -137,11 +137,13 @@ static int extend_pcr(int index)
 /* The terminal event for the seal act. Every exit emits exactly one, or
  * the host reader blocks until its idle timeout and the page never leaves
  * the step it was on. */
-static void seal_verdict(int pass)
+static void seal_verdict(int pass, int accessOnly)
 {
     demo_put("{\"event\":\"seal.end\",\"pass\":");
     demo_put(pass ? "true" : "false");
-    demo_put("}\r\n");
+    demo_put(",\"mode\":\"");
+    demo_put(accessOnly ? "access" : "deny");
+    demo_put("\"}\r\n");
 }
 
 /* Load the sealed blob and unseal it under a PCR policy session. The policy
@@ -240,7 +242,11 @@ static void act_pcr_reset(void)
     act_pcr();
 }
 
-static void act_seal(void)
+/* accessOnly stops after the matching unseal, so the page can tell the
+ * release half of the story on its own. Deny mode runs the whole sequence:
+ * the matching unseal is the control that proves the blob was good, without
+ * which a refusal afterwards could just mean sealing never worked. */
+static void act_seal(int accessOnly)
 {
     WOLFTPM2_KEY primary;
     WOLFTPM2_KEYBLOB seal;
@@ -263,6 +269,8 @@ static void act_seal(void)
     demo_put_u32(DEMO_SEAL_PCR);
     demo_put(",\"secret\":\"");
     demo_put(seal_secret);
+    demo_put("\",\"mode\":\"");
+    demo_put(accessOnly ? "access" : "deny");
     demo_put("\"}\r\n");
 
     /* Whatever the previous act left in the auth slots is applied to the
@@ -276,7 +284,7 @@ static void act_seal(void)
         rc = read_pcr(DEMO_SEAL_PCR, digest, &digestSz);
     if (rc != TPM_RC_SUCCESS) {
         demo_fail("reset PCR", rc);
-        seal_verdict(0);
+        seal_verdict(0, accessOnly);
         return;
     }
     demo_put("{\"event\":\"seal.reset\",\"pcr\":");
@@ -294,7 +302,7 @@ static void act_seal(void)
                 NULL, 0);
     if (rc != TPM_RC_SUCCESS) {
         demo_fail("CreatePrimaryKey", rc);
-        seal_verdict(0);
+        seal_verdict(0, accessOnly);
         return;
     }
 
@@ -365,6 +373,13 @@ static void act_seal(void)
     }
     demo_put("}\r\n");
 
+    /* Access mode has told its whole story: PCR 16 is still at the value
+     * the policy was built from, so there is nothing to put back. */
+    if (accessOnly) {
+        seal_verdict(sealedOk, accessOnly);
+        goto out_primary;
+    }
+
     /* Change the measurement, which must make the same unseal fail. Kept in
      * its own flag: the refusal below overwrites rc, so without one a PCR
      * that never moved would still read as a policy that held. */
@@ -407,11 +422,12 @@ static void act_seal(void)
      * while the measurement matched, the measurement then actually changed,
      * the same blob was refused, and PCR 16 went back. A refusal on its own
      * could just mean sealing never worked. */
-    seal_verdict(sealedOk && extendOk && deniedOk && restoreOk);
+    seal_verdict(sealedOk && extendOk && deniedOk && restoreOk,
+                 accessOnly);
     goto out_primary;
 
 out_fail:
-    seal_verdict(0);
+    seal_verdict(0, accessOnly);
 out_primary:
     wolfTPM2_UnloadHandle(&dev, &primary.handle);
 }
@@ -419,20 +435,22 @@ out_primary:
 /* The endorsement certificates live in the TCG-reserved NV range. Each one
  * is streamed out as it is read rather than collected, because several
  * kilobytes of certificate will not all fit alongside everything else. */
-/* The key behind one certificate, so the host can show it belongs to this
- * chip. Only P-256: each match costs a key derivation on the part. */
-static void ek_report_pubkey(void)
+/* Derive the key behind one certificate, so the host can show it belongs to
+ * this chip. The template follows the certificate's own NV index rather than
+ * a fixed one: a part ships several, and only the key that index names will
+ * match what that certificate carries. Each one costs a derivation. */
+static void ek_report_pubkey(word32 nvIndex)
 {
     static WOLFTPM2_KEY ek;
     TPMT_PUBLIC publicTemplate;
     TPMS_ECC_POINT* pt;
+    TPM2B_PUBLIC_KEY_RSA* modulus;
     int rc;
 
     memset(&ek, 0, sizeof(ek));
     memset(&publicTemplate, 0, sizeof(publicTemplate));
 
-    rc = wolfTPM2_GetKeyTemplate_EKIndex(TPM2_NV_ECC_EK_CERT,
-            &publicTemplate);
+    rc = wolfTPM2_GetKeyTemplate_EKIndex(nvIndex, &publicTemplate);
     if (rc == TPM_RC_SUCCESS)
         rc = wolfTPM2_CreatePrimaryKey(&dev, &ek, TPM_RH_ENDORSEMENT,
                 &publicTemplate, NULL, 0);
@@ -441,13 +459,28 @@ static void ek_report_pubkey(void)
         return;
     }
 
-    pt = &ek.pub.publicArea.unique.ecc;
+    /* Nothing the host can compare, so say nothing rather than leave a
+     * half-written event for the next one to run into. */
+    if (ek.pub.publicArea.type != TPM_ALG_ECC &&
+            ek.pub.publicArea.type != TPM_ALG_RSA) {
+        wolfTPM2_UnloadHandle(&dev, &ek.handle);
+        return;
+    }
+
     demo_put("{\"event\":\"ek.pub\",\"index\":\"0x");
-    demo_put_hex32(TPM2_NV_ECC_EK_CERT);
-    demo_put("\",\"curve\":\"P-256\",\"x\":\"");
-    demo_put_hexbuf(pt->x.buffer, pt->x.size);
-    demo_put("\",\"y\":\"");
-    demo_put_hexbuf(pt->y.buffer, pt->y.size);
+    demo_put_hex32(nvIndex);
+    if (ek.pub.publicArea.type == TPM_ALG_ECC) {
+        pt = &ek.pub.publicArea.unique.ecc;
+        demo_put("\",\"kind\":\"ecc\",\"x\":\"");
+        demo_put_hexbuf(pt->x.buffer, pt->x.size);
+        demo_put("\",\"y\":\"");
+        demo_put_hexbuf(pt->y.buffer, pt->y.size);
+    }
+    else {
+        modulus = &ek.pub.publicArea.unique.rsa;
+        demo_put("\",\"kind\":\"rsa\",\"modulus\":\"");
+        demo_put_hexbuf(modulus->buffer, modulus->size);
+    }
     demo_put("\"}\r\n");
 
     wolfTPM2_UnloadHandle(&dev, &ek.handle);
@@ -461,10 +494,6 @@ static void act_ek_certs(void)
     int found = 0, i, rc;
 
     demo_put("{\"event\":\"ek.begin\"}\r\n");
-
-    /* Before the certificates, so the host already has the key when it
-     * builds each row and can say on the row itself whether it matches. */
-    ek_report_pubkey();
 
     /* Enumerate what is actually in the TCG NV space rather than guessing
      * indices: which certificates a part ships with varies, and a fixed
@@ -499,6 +528,10 @@ static void act_ek_certs(void)
         rc = wolfTPM2_NVReadAuth(&dev, &nv, nvIndex, cert, &sz, 0);
         if (rc != TPM_RC_SUCCESS)
             continue;
+
+        /* Immediately before its certificate, so the host has the key while
+         * it builds that row and can say on the row whether the two match. */
+        ek_report_pubkey(nvIndex);
 
         found++;
         demo_put("{\"event\":\"ek.cert\",\"index\":\"0x");
@@ -560,7 +593,9 @@ void main(void)
         switch (demo_getc()) {
             case 'i': if (tpm_ready()) act_identity(); break;
             case 'p': if (tpm_ready()) act_pcr();      break;
-            case 'l': if (tpm_ready()) act_seal();     break;
+            case 'l': if (tpm_ready()) act_seal(0);    break;
+            /* Same act, stopping at the release half. */
+            case 'o': if (tpm_ready()) act_seal(1);    break;
             case 'e': if (tpm_ready()) act_ek_certs(); break;
 #ifdef WOLFTPM_SPDM_TCG
             /* A negative return means the plain device was not restored,

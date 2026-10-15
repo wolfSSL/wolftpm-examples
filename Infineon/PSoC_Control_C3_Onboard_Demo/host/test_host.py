@@ -8,6 +8,7 @@ third to check its own code.
 The short-signature case is here because it happens about once in five
 hundred handshakes. Waiting for it is not a test.
 """
+import base64
 import os
 import sys
 
@@ -136,6 +137,94 @@ check("not a certificate refused", x509_lite.parse(b"\x30\x03\x02\x01\x00"),
 check("length past the buffer refused",
       x509_lite.parse(b"\x30\x05\x30\x03\x02\x7f\x00"), None)
 check("random bytes refused", x509_lite.parse(bytes(range(64))), None)
+
+
+print("endorsement key match")
+# ek_record_from_der decides the "key matches" column, which is the whole
+# claim of the endorsement tab. Both branches are reachable: the part ships
+# RSA and ECC certificates side by side.
+
+
+def der(tag, body):
+    if len(body) < 0x80:
+        return bytes([tag, len(body)]) + body
+    n = len(body).to_bytes((len(body).bit_length() + 7) // 8, "big")
+    return bytes([tag, 0x80 | len(n)]) + n + body
+
+
+def oid(dotted):
+    parts = [int(p) for p in dotted.split(".")]
+    body = bytes([parts[0] * 40 + parts[1]])
+    for value in parts[2:]:
+        chunk = [value & 0x7F]
+        value >>= 7
+        while value:
+            chunk.insert(0, (value & 0x7F) | 0x80)
+            value >>= 7
+        body += bytes(chunk)
+    return der(0x06, body)
+
+
+def cert(spki):
+    """The smallest certificate x509_lite will describe. It reads the fields
+    by position, so every one ahead of the key has to be there."""
+    sigalg = der(0x30, oid("1.2.840.113549.1.1.11"))
+    empty = der(0x30, b"")
+    tbs = der(0x30, der(0xA0, der(0x02, b"\x02")) + der(0x02, b"\x01") +
+              sigalg + empty + empty + empty + spki)
+    return der(0x30, tbs + sigalg + der(0x03, b"\x00"))
+
+
+def rsa_cert(modulus):
+    key = der(0x30, der(0x02, modulus) + der(0x02, b"\x01\x00\x01"))
+    return cert(der(0x30,
+                    der(0x30, oid("1.2.840.113549.1.1.1") + der(0x05, b"")) +
+                    der(0x03, b"\x00" + key)))
+
+
+def ecc_cert(x, y):
+    return cert(der(0x30,
+                    der(0x30, oid("1.2.840.10045.2.1") +
+                        oid("1.2.840.10045.3.1.7")) +
+                    der(0x03, b"\x00\x04" + x + y)))
+
+
+def record(der_bytes, pub):
+    ev = {"index": "0x01C00002", "bytes": len(der_bytes),
+          "b64": base64.b64encode(der_bytes).decode()}
+    return server.ek_record_from_der(ev, {"0x01c00002": pub})
+
+
+# A real RSA modulus has its top bit set, so DER prefixes a zero byte that
+# the board's own report does not carry.
+MOD = b"\xc1" + b"\x7f" * 255
+check("RSA modulus parsed without the DER leading zero",
+      x509_lite.parse(rsa_cert(b"\x00" + MOD)).get("rsa_modulus"), MOD)
+check("RSA key size taken from the modulus",
+      x509_lite.parse(rsa_cert(b"\x00" + MOD)).get("bits"), 2048)
+check("RSA key matches",
+      record(rsa_cert(b"\x00" + MOD), ("rsa", MOD)).get("key_match"), True)
+check("RSA key with a padded board modulus still matches",
+      record(rsa_cert(b"\x00" + MOD), ("rsa", b"\x00" + MOD)).get("key_match"),
+      True)
+check("RSA key mismatch reported",
+      record(rsa_cert(b"\x00" + MOD), ("rsa", b"\x7f" + MOD[1:]))
+      .get("key_match"), False)
+
+EX = b"\x00" + b"\x11" * 31
+EY = b"\x22" * 32
+check("ECC coordinates compared as numbers",
+      record(ecc_cert(EX, EY), ("ecc", EX.lstrip(b"\x00"), EY))
+      .get("key_match"), True)
+check("ECC coordinate mismatch reported",
+      record(ecc_cert(EX, EY), ("ecc", EX, b"\x33" * 32)).get("key_match"),
+      False)
+# An RSA certificate paired with an ECC report proves nothing, and the ECC
+# branch would read a coordinate the RSA report does not have.
+check("key kind mismatch leaves the column empty",
+      record(rsa_cert(b"\x00" + MOD), ("ecc", EX, EY)).get("key_match"), None)
+check("ECC certificate with an RSA report leaves the column empty",
+      record(ecc_cert(EX, EY), ("rsa", MOD)).get("key_match"), None)
 
 print("shot websocket frames")
 

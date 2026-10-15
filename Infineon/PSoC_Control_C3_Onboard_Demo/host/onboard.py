@@ -34,6 +34,8 @@ COMMANDS = {
     "sign65": b"S",
     "tamper65": b"T",
     "seal": b"l",
+    # The same act, stopping at the release half.
+    "seal_access": b"o",
     "ek": b"e",
     "spdm": b"d",
     # TLS identity held in the TPM: report the public key, and
@@ -61,6 +63,7 @@ ACT_TERMINAL = {
     "sign65": "run.end",
     "tamper65": "run.end",
     "seal": "seal.end",
+    "seal_access": "seal.end",
     "ek": "ek.end",
     "spdm": "spdm.end",
     "boardpub": "boardsign.end",

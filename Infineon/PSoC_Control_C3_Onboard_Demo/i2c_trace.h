@@ -59,4 +59,12 @@ void i2c_trace_dump(void);
 
 #endif /* DEMO_I2C_TRACE */
 
+/* Time spent moving signature bytes over the bus, so the sign act can say
+ * how much of a measurement was the part computing and how much was the
+ * transport. Always built, unlike the trace above: the figure is shown on
+ * the page rather than dumped for debugging. Only FIFO reads are counted,
+ * so this is the response transfer, not the whole exchange. */
+void tpm_i2c_measure_begin(void);
+uint32_t tpm_i2c_measure_end_ms(void);
+
 #endif /* I2C_TRACE_H_INCLUDED */
