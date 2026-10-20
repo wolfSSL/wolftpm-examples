@@ -20,6 +20,7 @@ try:
     import fcntl
 except ImportError:          # Windows has no flock
     fcntl = None
+import atexit
 import json
 import os
 import collections
@@ -2199,6 +2200,13 @@ def choose_http_port():
     return HTTP_PORT, True
 
 
+def _unlink_quietly(path):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
 if __name__ == "__main__":
     HTTP_PORT, duplicate = choose_http_port()
     if duplicate:
@@ -2209,13 +2217,18 @@ if __name__ == "__main__":
             "  Get-Process python* | Stop-Process -Force\n" % HTTP_PORT)
         raise SystemExit(1)
     # Record the pid beside the script so the launcher can stop this server
-    # and not every python running something called server.py.
+    # and not every python running something called server.py. Remove it
+    # again on the way out: a file that outlives its process names a pid
+    # Windows is free to hand to something else.
+    PID_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "server.pid")
     try:
-        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                               "server.pid"), "w") as pidf:
+        with open(PID_FILE, "w") as pidf:
             pidf.write("%d" % os.getpid())
     except OSError:
         pass
+    else:
+        atexit.register(lambda: _unlink_quietly(PID_FILE))
     sys.stderr.write("\n  Demo at http://%s:%d\n" % (HTTP_HOST, HTTP_PORT))
     if ONBOARD_PORT:
         sys.stderr.write("  Looking for the board on %s\n\n" % ONBOARD_PORT)

@@ -6,6 +6,10 @@ mldsa_onboard.elf
 mldsa_onboard.bin
 mldsa_onboard.ld
 mldsa_onboard.map
+mldsa_bench.elf
+mldsa_bench.bin
+mldsa_bench.ld
+mldsa_bench.map
 demo_acts.elf
 demo_acts.bin
 demo_acts.ld

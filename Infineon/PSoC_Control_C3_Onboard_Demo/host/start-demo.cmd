@@ -27,13 +27,11 @@ REM the host has no reset mechanism, and the bootloader output it is meant to
 REM show never appears.
 set TPM_RESET_CMD=powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0..\firmware\reset-board.ps1"
 
-REM Stop a previous run of THIS demo by the pid it recorded. Matching every
-REM python.exe whose command line mentions server.py also kills unrelated
-REM development servers on the same machine.
-if exist "%~dp0server.pid" (
-  for /f "usebackq delims=" %%P in ("%~dp0server.pid") do taskkill /PID %%P /F >nul 2>&1
-  del "%~dp0server.pid" >nul 2>&1
-)
+REM Stop a previous run of THIS demo. Matching every python.exe whose
+REM command line mentions server.py also kills unrelated development
+REM servers, and killing the recorded pid unchecked kills whatever has
+REM inherited it; stop-demo.ps1 confirms the process is this one first.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0stop-demo.ps1"
 timeout /t 3 /nobreak >nul
 
 REM Find an interpreter rather than naming one. The launcher py.exe comes

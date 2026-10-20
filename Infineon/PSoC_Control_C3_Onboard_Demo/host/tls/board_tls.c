@@ -223,8 +223,17 @@ static int write_file(const char* path, const unsigned char* buf, int sz)
         fprintf(stderr, "board_tls: cannot write %s\n", path);
         return -1;
     }
-    fwrite(buf, 1, (size_t)sz, f);
-    fclose(f);
+    /* A short write, or a flush that fails at close, leaves a truncated
+     * certificate the caller would otherwise announce as written. */
+    if (fwrite(buf, 1, (size_t)sz, f) != (size_t)sz) {
+        fprintf(stderr, "board_tls: short write on %s\n", path);
+        fclose(f);
+        return -1;
+    }
+    if (fclose(f) != 0) {
+        fprintf(stderr, "board_tls: cannot close %s\n", path);
+        return -1;
+    }
     return 0;
 }
 

@@ -44,9 +44,8 @@ COMMANDS = {
     "boardsign": b"g",
 }
 
-# An act is finished when one of these arrives. The board emits a specific
-# one per act rather than a single generic marker, so they are all listened
-# for rather than assuming which act is running.
+# An act is finished when one of these arrives. Used only when the act is
+# not known; a run started here waits for the one its own act owes.
 TERMINAL_EVENTS = {"run.end", "pcr.end", "seal.end", "ek.end",
                    "spdm.end", "tpm.identity", "boardsign.end"}
 
@@ -98,6 +97,9 @@ class OnboardReader:
         self.idle = idle
         self.completed = False
         self.timed_out = None
+        # An act that did not finish is still producing output, which the
+        # next run must not read as its own.
+        self.stale = False
         self.ser = serial.Serial(port, baud, timeout=0.2)
         # Leave DTR and RTS alone: on many USB-serial bridges they are wired
         # to the target's reset, and asserting them would restart the board
@@ -120,6 +122,27 @@ class OnboardReader:
             self.ser.reset_input_buffer()
         except OSError:
             pass
+
+    def quiesce(self, idle=None, limit=None):
+        """Read and discard until the port has been silent for a while.
+
+        Draining the buffer only removes what has already arrived. An act
+        abandoned on a timeout keeps emitting, terminal event included, and
+        two runs of the same act cannot be told apart by event name, so the
+        leftovers have to be consumed before the next command goes out.
+        """
+        idle = self.idle if idle is None else idle
+        limit = (idle * 4.0) if limit is None else limit
+        end = time.time() + limit
+        last = time.time()
+        while time.time() < end:
+            chunk = self.ser.read(4096)
+            now = time.time()
+            if chunk:
+                last = now
+            elif (now - last) > idle:
+                return True
+        return False
 
     def listen(self, secs):
         """Yield whatever arrives for a while, without sending anything.
@@ -158,18 +181,22 @@ class OnboardReader:
         budget = ACT_BUDGETS.get(act, (0.0, 0.0))
         self.completed = False
         self.timed_out = None
+        if self.stale:
+            self.quiesce()
         self.drain()
         self.ser.write(cmd)
         if payload:
             self.ser.write(payload + b"\n")
         self.ser.flush()
         yield from self._read_until_done(max(self.timeout, budget[0]),
-                                         max(self.idle, budget[1]))
+                                         max(self.idle, budget[1]),
+                                         ACT_TERMINAL.get(act))
 
-    def _read_until_done(self, timeout, idle):
+    def _read_until_done(self, timeout, idle, expect=None):
         started = time.time()
         last = started
         buf = b""
+        self.stale = True
         while True:
             chunk = self.ser.read(4096)
             now = time.time()
@@ -182,8 +209,9 @@ class OnboardReader:
                     if not line:
                         continue
                     yield line
-                    if _is_terminal(line):
+                    if _is_terminal(line, expect):
                         self.completed = True
+                        self.stale = False
                         return
             elif (now - last) > idle:
                 self.timed_out = "idle"
@@ -193,25 +221,35 @@ class OnboardReader:
                 return
 
 
-def _is_terminal(line):
+def _is_terminal(line, expect=None):
+    """Whether this line ends the act.
+
+    With an act's own terminal named, nothing else counts: a stale event
+    left over from an abandoned run would otherwise end the current one,
+    which reports a timed-out act as finished and leaves the rest of its
+    output to be read as the next act's.
+    """
     if not line.startswith("{"):
         return False
     try:
         name = json.loads(line).get("event")
     except ValueError:
         return False
+    if expect is not None:
+        return name == expect
     return name in TERMINAL_EVENTS
 
 
 def replay(path, act=None):
     """Yield lines from a captured stream, for testing with no board."""
+    expect = ACT_TERMINAL.get(act) if act else None
     with open(path, "r") as fh:
         for raw in fh:
             line = raw.strip()
             if not line:
                 continue
             yield line
-            if _is_terminal(line):
+            if _is_terminal(line, expect):
                 return
 
 

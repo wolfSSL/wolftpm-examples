@@ -2,7 +2,10 @@
 # Capture one screenshot per tab for sharing. Attract is disabled for the
 # duration so the loop cannot switch tabs mid-capture, then put back to
 # whatever it was, from an EXIT trap so a failure restores it too.
-set -u
+# pipefail as well as errexit: every capture is piped through tail,
+# which succeeds whatever shot.py did, so without it a failed shot is
+# invisible and the run ends with "done" over stale png files.
+set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")" || exit 1
 OUT="${SHOT_DIR:-$HOME/claude-spdm/shots}"
 mkdir -p "$OUT"
@@ -17,7 +20,7 @@ DEV=""
 YIELDED=0
 if [ -n "${TPM_ONBOARD_PORT:-}" ] && command -v uart-monitor >/dev/null; then
     DEV="$(readlink -f "$TPM_ONBOARD_PORT")"
-    uart-monitor yield "$DEV" >/dev/null && YIELDED=1
+    if uart-monitor yield "$DEV" >/dev/null; then YIELDED=1; fi
 fi
 
 off() { curl -s -X POST -H 'Content-Type: application/json' \

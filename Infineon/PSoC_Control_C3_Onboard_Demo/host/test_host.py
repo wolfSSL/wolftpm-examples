@@ -14,6 +14,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import onboard                                       # noqa: E402
 import server                                        # noqa: E402
 import shot                                          # noqa: E402
 import spdm_pubkey                                   # noqa: E402
@@ -270,6 +271,89 @@ check("ping between fragments ignored",
       read_one([text_frame(b'{"id":', fin=False),
                 bytes([0x89, 0x00]),
                 text_frame(b'1}', cont=True)]), '{"id":1}')
+
+
+print("onboard terminal correlation")
+check("the act's own terminal ends it",
+      onboard._is_terminal('{"event":"run.end"}', "run.end"), True)
+check("another act's terminal does not",
+      onboard._is_terminal('{"event":"pcr.end"}', "run.end"), False)
+check("any terminal ends an act that named none",
+      onboard._is_terminal('{"event":"pcr.end"}', None), True)
+check("an ordinary event never ends one",
+      onboard._is_terminal('{"event":"sign.digest"}', "run.end"), False)
+check("every act names a terminal",
+      sorted(onboard.ACT_TERMINAL), sorted(onboard.COMMANDS))
+
+
+class FakeBoard:
+    """A board on the end of a serial port, for the reader alone.
+
+    It answers a command byte with canned lines, and can start out still
+    emitting the output of an act the host gave up on, which is the case
+    the correlation exists for. reset_input_buffer does nothing on purpose:
+    the leftovers that matter have not arrived yet.
+    """
+
+    def __init__(self, replies, leftover=()):
+        self.replies = replies
+        self.queue = [line.encode() + b"\n" for line in leftover]
+        self.written = b""
+
+    def read(self, _n):
+        return self.queue.pop(0) if self.queue else b""
+
+    def write(self, data):
+        self.written += data
+        for byte in data:
+            for line in self.replies.get(bytes([byte]), ()):
+                self.queue.append(line.encode() + b"\n")
+
+    def flush(self):
+        pass
+
+    def reset_input_buffer(self):
+        pass
+
+
+def read_act(act, board, stale=False):
+    """Run one act against a FakeBoard without opening a serial port."""
+    r = object.__new__(onboard.OnboardReader)
+    r.timeout = 2.0
+    r.idle = 0.2
+    r.completed = False
+    r.timed_out = None
+    r.stale = stale
+    r.ser = board
+    lines = list(r.run(act))
+    return lines, r.completed, r.stale
+
+
+# A different act's terminal arriving mid-run is the host-restart case the
+# reader is documented to expect.
+board = FakeBoard({b"s": ['{"event":"pcr.end"}',
+                          '{"event":"sign.digest"}',
+                          '{"event":"run.end"}']})
+lines, completed, stale = read_act("sign", board)
+check("a stale pcr.end does not finish a sign", len(lines), 3)
+check("the sign still completes on its own terminal", completed, True)
+check("a completed act leaves nothing to resynchronise", stale, False)
+
+# An act that never gets its terminal must say so, and must leave the next
+# one knowing the board is still talking.
+board = FakeBoard({b"s": ['{"event":"pcr.end"}']})
+lines, completed, stale = read_act("sign", board)
+check("a sign with no run.end does not complete", completed, False)
+check("an incomplete act marks the port stale", stale, True)
+
+# Two runs of the same act cannot be told apart by event name, so the
+# leftovers have to be consumed before the next command goes out.
+board = FakeBoard({b"s": ['{"event":"sign.digest"}',
+                          '{"event":"run.end"}']},
+                  leftover=['{"event":"run.end"}'])
+lines, completed, stale = read_act("sign", board, stale=True)
+check("the previous run's terminal is consumed first", len(lines), 2)
+check("the new run completes on its own", completed, True)
 
 print()
 if failed:

@@ -39,7 +39,7 @@ WC = $(WOLFSSL_DIR)/wolfcrypt/src
 .PHONY: all clean
 all: factory
 
-clean: tpm-clean onboard-clean acts-clean spdm-clean factory-clean
+clean: tpm-clean onboard-clean bench-clean acts-clean spdm-clean factory-clean
 
 # ---------------------------------------------------------------------------
 # On-board TPM identity read. Drives the TPM from the MCU over I2C with no
@@ -129,6 +129,47 @@ mldsa_onboard.bin: mldsa_onboard.elf
 
 onboard-clean:
 	rm -f mldsa_onboard.elf mldsa_onboard.bin mldsa_onboard.ld mldsa_onboard.map
+
+# ---------------------------------------------------------------------------
+# How long the MCU takes to verify an ML-DSA-87 signature. No TPM is
+# involved and none has to be attached: the signature is the fixed vector
+# in mldsa_tv.h, so the figure is repeatable and WOLFTPM_DIR is not needed.
+# ---------------------------------------------------------------------------
+BENCH_DEFS = -DTARGET_psoc_c3 -DWOLFSSL_USER_SETTINGS \
+             -DPSOC_C3_UART_SCB=3 -DPSOC_C3_UART_PORT=6 \
+             -DPSOC_C3_UART_PCLK_GR=4 -DPSOC_C3_UART_PCLK_IDX=6 \
+             -DPSOC_C3_PCLK_HZ=48000000
+
+BENCH_CFLAGS = -mcpu=cortex-m33 -mthumb -Os -Wall \
+               -ffreestanding -ffunction-sections -fdata-sections \
+               -fno-common -I. -I$(WOLFBOOT_DIR) -I$(WOLFBOOT_DIR)/include \
+               -I$(WOLFSSL_DIR) $(BENCH_DEFS)
+
+BENCH_SRCS = mldsa_bench.c \
+             $(WC)/wc_mldsa.c $(WC)/sha3.c $(WC)/hash.c $(WC)/sha256.c \
+             $(WC)/memory.c $(WC)/wc_port.c $(WC)/logging.c $(WC)/misc.c \
+             $(WC)/asn.c $(WC)/wolfmath.c $(WC)/sp_int.c \
+             $(WOLFBOOT_DIR)/hal/psoc_c3.c \
+             $(WOLFBOOT_DIR)/test-app/startup_arm.c
+
+.PHONY: bench bench-clean
+bench: mldsa_bench.bin
+	@$(SIZE) mldsa_bench.elf
+
+mldsa_bench.ld: $(WOLFBOOT_DIR)/test-app/ARM-psoc_c3.ld FORCE
+	sed -e "s/@WOLFBOOT_TEST_APP_ADDRESS@/$(APP_ADDR)/g" \
+	    -e "s/@WOLFBOOT_TEST_APP_SIZE@/$(APP_SIZE)/g" $< > $@
+
+mldsa_bench.elf: $(BENCH_SRCS) mldsa_bench.ld
+	$(CC) $(BENCH_CFLAGS) $(BENCH_SRCS) -mcpu=cortex-m33 -mthumb \
+	    -nostartfiles -ffreestanding -Wl,-gc-sections \
+	    -Wl,-Map=mldsa_bench.map -T mldsa_bench.ld -o $@
+
+mldsa_bench.bin: mldsa_bench.elf
+	$(OBJCOPY) -O binary $< $@
+
+bench-clean:
+	rm -f mldsa_bench.elf mldsa_bench.bin mldsa_bench.ld mldsa_bench.map
 
 # ---------------------------------------------------------------------------
 # All the demo acts in one image, selected by a command byte on the console.

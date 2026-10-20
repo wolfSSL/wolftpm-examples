@@ -72,6 +72,27 @@ About 54 KB of flash and 52 KB of RAM, the latter including a 24 KB heap for wol
 
 `wolfTPM2_GetKeyTemplate_HASH_MLDSA()` takes the object attributes before the parameter set; reversing them returns `TPM_RC_RESERVED_BITS` on parameter 2.
 
+## Verifying a post-quantum signature on the MCU
+
+`mldsa_bench.c` times `wc_MlDsaKey_VerifyCtx()` on the C3M6 itself, which is
+what decides whether the verification can stay on the board rather than going
+back to a host. No TPM takes part and none has to be attached: the key,
+message and signature are the fixed ML-DSA-87 vector in `mldsa_tv.h`, so the
+figure is repeatable, and the build needs no `WOLFTPM_DIR`.
+
+```
+make bench WOLFBOOT_DIR=<wolfboot> WOLFSSL_DIR=<wolfssl>
+```
+
+It prints the cycle count for each of `BENCH_ITERATIONS` runs and the best,
+worst and mean. Cycles are the measurement; the milliseconds beside them are
+only as good as `CPU_HZ`, so the run begins by spinning `CLKCAL_CYCLES`
+between two console markers, which lets whatever is reading the console
+derive the core clock from the wall time between them and confirm or correct
+that constant. The timebase is the DWT cycle counter where the core
+implements it and SysTick where it does not, which the first lines of the
+output say.
+
 ## All the acts, selected by a command byte
 
 `demo_acts.c` puts the acts in one image and picks between them with a single

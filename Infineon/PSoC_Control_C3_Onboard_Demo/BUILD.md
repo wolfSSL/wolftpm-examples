@@ -276,13 +276,14 @@ Four things will cost you an afternoon if you skip them:
   V9.84 are known good. Several versions install side by side, so check which
   one is actually on PATH.
 
-Windows users: `firmware/flash.ps1` does all of the above, including finding the newest `JLink.exe` among the versions installed:
+A script does all of the above on either platform, including finding the newest `JLink.exe` among the versions installed on Windows:
 
 ```
-powershell -ExecutionPolicy Bypass -File firmware\flash.ps1
+powershell -ExecutionPolicy Bypass -File firmware\flash.ps1    # Windows
+firmware/flash.sh                                              # Linux, macOS
 ```
 
-It prints `FLASH DONE`. To flash an image other than the one beside it, pass `-Image <path>`.
+Both print `FLASH DONE`, and both fail loudly rather than quietly: J-Link Commander prints `O.K.` after a successful connect whether or not the image was then written, so they require one that follows the download. To flash an image other than the one beside them, pass the path: `-Image <path>` to the first, as the sole argument to the second. Set `TPM_BOARD_SERIAL` to pin the probe.
 
 ## 5. Run the demo
 
@@ -294,6 +295,19 @@ python3 server.py
 
 It prints the address to open and the serial port it found. Neither needs
 configuring; see `host/README.md` for the settings that override them.
+
+One thing does need setting here, because there is no launcher to do it:
+the Console tab's Reset button drives the board through the debug probe, and
+without this it reports that the host has no reset mechanism.
+
+```
+export TPM_RESET_CMD=$PWD/../firmware/reset-board.sh
+```
+
+Use the script rather than a J-Link command line. The server runs the command
+from the `host` directory, and J-Link Commander exits 0 when it cannot open
+its script, so a wrong relative path there is reported as a successful reset
+that never happened.
 
 To drive the board without a browser:
 

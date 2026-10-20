@@ -44,6 +44,7 @@ All optional.
 | `TPM_HTTP_PORT` | Serve on exactly this port, and refuse to start if it is in use. |
 | `TPM_ATTRACT` | `1` to let the demo cycle itself when nobody is pressing anything. |
 | `TPM_PORT_LOG` | `1` to log every open and close of the board's serial port. |
+| `TPM_RESET_CMD` | Command that resets the board through the debug probe, for the Console tab's Reset button. |
 | `TPM_TLS_BIN` | Use this `board_tls` binary instead of looking in `tls/`. |
 | `TPM_TLS_MLDSA` | ML-DSA parameter set the page names. Default `87`. |
 | `WOLFSSL_PQTLS_LIB_DIR` | Where the patched wolfSSL's shared library is. |
@@ -124,8 +125,13 @@ cd $DEMO/host
 make -C tls WOLFSSL_DIR=$ROOT/wolfssl-pqtls
 ```
 
-On Windows add `CC=gcc` to that line, so the native compiler is used rather
-than whatever `cc` resolves to.
+On Windows build this from the MSYS2 MINGW64 shell and pass
+`CC=/mingw64/bin/gcc`. The MSYS gcc at `/usr/bin/gcc` targets the POSIX
+emulation layer and cannot link a library the MinGW compiler built: the
+link fails with a wall of `undefined reference to __imp__errno`,
+`__imp__stricmp` and `__mingw_vfprintf`, which reads as a broken wolfSSL
+rather than as the wrong compiler. Whichever of the two built wolfSSL
+above has to build this as well.
 
 Under MSYS2 that link is static, so `board_tls.exe` can be copied to the
 machine the demo actually runs on without MSYS2 being installed there. Build
@@ -154,24 +160,33 @@ The Reset button on the Console tab restarts the MCU and the TPM together:
 their reset lines are tied, so a pin reset through the debug probe covers
 both. The bootloader's output then appears on the same tab.
 
-It needs `TPM_RESET_CMD` pointing at a debug-probe reset. With SEGGER tools
-and `firmware/reset-board.jlink` from this example:
-
-Windows
-
-```
-set TPM_RESET_CMD="C:\Program Files\SEGGER\JLink\JLink.exe" -device PSC3xxF -if SWD -speed 4000 -autoconnect 1 -CommanderScript firmware\reset-board.jlink
-```
-
-Linux
+It needs `TPM_RESET_CMD` pointing at a debug-probe reset. Use the scripts
+beside the example rather than a J-Link command line; `start-demo.cmd`
+already does this on Windows, so only the other platforms need the variable
+set by hand, from this directory:
 
 ```
-export TPM_RESET_CMD='JLinkExe -device PSC3xxF -if SWD -speed 4000 -autoconnect 1 -CommanderScript firmware/reset-board.jlink'
+export TPM_RESET_CMD=$PWD/../firmware/reset-board.sh
 ```
 
-Add `-SelectEmuBySN <serial>` when more than one probe is attached. Without
-`TPM_RESET_CMD` the button reports that the host has no reset mechanism
-rather than appearing to work.
+The Windows equivalent, if you start the server yourself instead of through
+`start-demo.cmd`:
+
+```
+set TPM_RESET_CMD=powershell -NoProfile -ExecutionPolicy Bypass -File "%CD%\..\firmware\reset-board.ps1"
+```
+
+Both take an optional probe serial, or read `TPM_BOARD_SERIAL`, for a bench
+with more than one attached.
+
+Two reasons not to write the J-Link invocation out by hand here. The server
+runs this command from the `host` directory, so a `-CommanderScript
+firmware/reset-board.jlink` resolves against the wrong directory; and
+J-Link Commander **exits 0 when it cannot open its script**, so the failure
+is silent and the server reports a reset that never happened. The scripts
+use an absolute path and `-ExitOnError 1`. Without `TPM_RESET_CMD` at all,
+the button says the host has no reset mechanism rather than appearing to
+work.
 
 ## Files
 
