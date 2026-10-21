@@ -1,0 +1,2235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Post-Quantum TPM Demo</title>
+<style>
+  :root {
+    --bg: #0b1014;
+    --panel: #131a21;
+    --panel-2: #1a232c;
+    --line: #26323d;
+    --fg: #e8eef4;
+    --muted: #8899a8;
+    --accent: #3fb8af;
+    --pass: #35c46a;
+    --fail: #e5484d;
+    --wait: #e8a33d;
+    --pq: #3fb8af;
+    --classical: #6b7a8a;
+  }
+  html { scrollbar-gutter: stable; }
+  [hidden] { display: none !important; }
+  table.cmp td.ok { color: var(--pass); }
+  /* Without horizontal padding the right-aligned match column butts straight
+     into the left-aligned issuer name and reads as one word. */
+  table.cmp td + td, table.cmp th + th { padding-left: 1rem; }
+  table.cmp th.left, table.cmp td.issuer { text-align: left; }
+  table.cmp td.issuer { font-weight: 500; white-space: normal;
+                        color: var(--muted); font-size: .9rem; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 18px; line-height: 1.45;
+  }
+  header {
+    display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap;
+    padding: 1.1rem 1.6rem; border-bottom: 1px solid var(--line);
+    background: var(--panel);
+  }
+  header h1 { margin: 0; font-size: 1.5rem; letter-spacing: -0.01em; }
+  header .sub { color: var(--muted); font-size: 1rem; }
+  .chip {
+    margin-left: auto; font-size: 0.95rem; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 0.25rem 0.85rem; white-space: nowrap;
+  }
+  .chip b { color: var(--accent); font-weight: 600; }
+  .dot { display:inline-block; width:.55rem; height:.55rem; border-radius:50%;
+         background: var(--fail); margin-right:.45rem; vertical-align: middle; }
+  .dot.on { background: var(--pass); }
+
+  .claim { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+           padding: .85rem 1.6rem; background: var(--panel-2);
+           border-bottom: 1px solid var(--line); font-size: 1.05rem; }
+  .claim .cue { margin-left: auto; color: var(--accent); font-weight: 600;
+                font-size: .95rem; white-space: nowrap;
+                border: 1px solid var(--accent); border-radius: 999px;
+                padding: .2rem .8rem; opacity: 0; transition: opacity .4s; }
+  .claim.idle .cue { opacity: 1; }
+
+  .tabs { display: flex; gap: .4rem; align-items: center; flex-wrap: wrap;
+          padding: 0 1.6rem; background: var(--panel);
+          border-bottom: 1px solid var(--line); }
+  .tab { font: inherit; font-weight: 600; font-size: 1rem; color: var(--muted);
+         background: none; border: 0; border-bottom: 3px solid transparent;
+         border-radius: 0; padding: .85rem 1.1rem; cursor: pointer; }
+  .tab:hover { color: var(--fg); }
+  .tab.active { color: var(--fg); border-bottom-color: var(--accent); }
+  .tab.auto { margin-left: auto; font-size: .92rem; }
+  .view { padding-top: 1.4rem; }
+  .pcrgrid { display: grid; gap: .45rem; margin: 1rem 0;
+             grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); }
+  .pcrcell { display: flex; align-items: baseline; gap: .7rem;
+             padding: .45rem .7rem; border: 1px solid var(--line);
+             border-radius: 7px; background: var(--panel-2); }
+  .pcrcell .i { color: var(--muted); font-size: .85rem; min-width: 3.4rem;
+                font-variant-numeric: tabular-nums; }
+  .pcrcell .d { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                font-size: .82rem; color: var(--muted); }
+  .pcrcell.set .d { color: var(--accent); }
+  .pcrcell.set { border-color: #2a4e4a; }
+  .pcrcell.drtm .d { color: #6b7a8a; }
+  .pcrcell.hit { border-color: var(--wait); }
+  .pcrcell.hit .d { color: var(--wait); }
+
+  .lead { margin: 0 0 1rem; color: var(--muted); font-size: 1rem;
+          max-width: 110ch; }
+  .lead b { color: var(--fg); }
+
+  main { padding: 0 1.6rem 1.4rem; display: grid; gap: 1.4rem;
+         grid-template-columns: 1fr 1fr; max-width: 1600px; }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+
+  .panel { background: var(--panel); border: 1px solid var(--line);
+           border-radius: 12px; padding: 1.1rem 1.25rem; min-width: 0; }
+  .panel h2 { margin: 0 0 .9rem; font-size: .95rem; letter-spacing: .09em;
+              text-transform: uppercase; color: var(--muted); font-weight: 600; }
+
+  .controls { display: flex; gap: .7rem; flex-wrap: wrap; align-items: center; }
+  button {
+    font: inherit; font-weight: 600; color: var(--fg);
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 9px; padding: .7rem 1.3rem; cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); color: #06231f; border-color: transparent; }
+  button.danger  { background: #3a1d1f; border-color: #6b2b2f; color: #ffc9cb; }
+  select { font: inherit; background: var(--panel-2); color: var(--fg);
+           border: 1px solid var(--line); border-radius: 9px; padding: .65rem .8rem; }
+  .segmented { display: inline-flex; border: 1px solid var(--line); border-radius: 6px;
+               overflow: hidden; }
+  .segmented button { border: 0; border-radius: 0; padding: .65rem 1rem;
+                      color: var(--muted); background: var(--panel-2); }
+  .segmented button + button { border-left: 1px solid var(--line); }
+  .segmented button.selected { background: var(--accent); color: #06231f; }
+
+  /* Pipeline */
+  ol.steps { list-style: none; margin: 0; padding: 0; }
+  ol.steps li {
+    display: grid; grid-template-columns: 1.7rem 1fr auto; gap: .8rem;
+    align-items: center; padding: .62rem 0;
+    border-bottom: 1px dashed var(--line); color: var(--muted);
+  }
+  ol.steps li:last-child { border-bottom: 0; }
+  ol.steps li .mark {
+    width: 1.7rem; height: 1.7rem; border-radius: 50%; display: grid;
+    place-items: center; border: 2px solid var(--line); font-size: .95rem;
+  }
+  ol.steps li.active { color: var(--fg); }
+  ol.steps li.active .mark { border-color: var(--wait); color: var(--wait); }
+  ol.steps li.done { color: var(--fg); }
+  ol.steps li.done .mark { border-color: var(--pass); color: var(--pass); }
+  ol.steps li.bad  { color: #ffc9cb; }
+  ol.steps li.bad .mark { border-color: var(--fail); color: var(--fail); }
+  ol.steps .detail { font-variant-numeric: tabular-nums; color: var(--muted);
+                     font-size: .95rem; text-align: right; }
+  ol.steps .detail.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                          font-size: .85rem; }
+  ol.steps .detail.secret { color: var(--accent); font-weight: 700; }
+
+  /* Sealed-secret state diagram */
+  .seal-visual { margin: 1.2rem 0 1.4rem; padding: 1rem 0;
+                 border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .seal-build { display: grid; grid-template-columns: minmax(12rem, 1fr) 3rem
+                minmax(12rem, 1fr) 3rem minmax(12rem, 1fr);
+                gap: .6rem; align-items: stretch; }
+  .seal-inputs { display: grid; gap: .65rem; }
+  .seal-node { min-width: 0; padding: .8rem .9rem; background: var(--panel-2);
+               border: 1px solid var(--line); border-radius: 5px;
+               transition: border-color .25s, background .25s; }
+  .seal-node .kicker { display: block; color: var(--muted); font-size: .72rem;
+                       letter-spacing: .09em; text-transform: uppercase; }
+  .seal-node strong { display: block; margin: .22rem 0; font-size: .95rem;
+                      overflow-wrap: anywhere; }
+  .seal-node small { display: block; color: var(--muted); font-size: .78rem; }
+  .seal-node.active { border-color: var(--wait); background: #211d17; }
+  .seal-node.done { border-color: var(--pass); }
+  .seal-node.changed { border-color: var(--wait); }
+  .seal-tpm { display: grid; align-content: center; text-align: center;
+              border-width: 2px; }
+  .seal-tpm strong { color: var(--accent); font-size: 1.1rem; }
+  .seal-arrow { position: relative; align-self: center; height: 2px;
+                background: var(--line); }
+  .seal-arrow::after { content: ""; position: absolute; right: 0; top: -5px;
+                       border-left: 9px solid var(--line);
+                       border-top: 6px solid transparent;
+                       border-bottom: 6px solid transparent; }
+  .seal-blob-bar { display: flex; height: .45rem; margin: .6rem 0;
+                   background: var(--line); }
+  .seal-blob-bar span:first-child { width: 43%; background: var(--accent); }
+  .seal-blob-bar span:last-child { flex: 1; background: #6b7a8a; }
+  .seal-outcomes { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;
+                   margin-top: 1rem; }
+  .seal-outcome { display: grid; grid-template-columns: auto 1fr auto;
+                  gap: .75rem; align-items: center; min-height: 4.2rem;
+                  padding: .7rem .85rem; border-left: 3px solid var(--line);
+                  background: color-mix(in srgb, var(--panel-2) 70%, transparent); }
+  .seal-outcome .state { color: var(--muted); font-size: .72rem;
+                         letter-spacing: .08em; text-transform: uppercase; }
+  .seal-outcome b { display: block; font-size: .9rem; }
+  .seal-outcome small { display: block; color: var(--muted); font-size: .78rem; }
+  .seal-outcome .result { color: var(--muted); font-weight: 700; text-align: right; }
+  .seal-outcome.active { border-left-color: var(--wait); }
+  .seal-outcome.active .state { color: var(--wait); }
+  .seal-outcome.done { border-left-color: var(--pass); }
+  .seal-outcome.done .state, .seal-outcome.done .result { color: var(--pass); }
+  .seal-outcome.protected { border-left-color: var(--accent); }
+  .seal-outcome.protected .state, .seal-outcome.protected .result { color: var(--accent); }
+  @media (max-width: 850px) {
+    .seal-build { grid-template-columns: 1fr; }
+    .seal-arrow { width: 2px; height: 1.5rem; justify-self: center; }
+    .seal-arrow::after { right: -5px; top: auto; bottom: 0;
+                         border-left: 6px solid transparent;
+                         border-right: 6px solid transparent;
+                         border-top: 9px solid var(--line); }
+    .seal-outcomes { grid-template-columns: 1fr; }
+    .seal-outcome { grid-template-columns: 1fr; gap: .35rem; }
+    .seal-outcome .result { text-align: left; }
+  }
+
+  /* Live SPDM flow */
+  .spdm-flow { margin: 1.2rem 0 1.5rem; }
+  .spdm-actors { display: grid; grid-template-columns: minmax(9rem, 1fr) 2fr minmax(9rem, 1fr);
+                 gap: 1rem; align-items: end; margin-bottom: .65rem; }
+  .spdm-actor { padding: .7rem .85rem; border-top: 3px solid var(--accent);
+                background: var(--panel-2); }
+  .spdm-actor:last-child { text-align: right; }
+  .spdm-actor b { display: block; font-size: 1rem; }
+  .spdm-actor span { color: var(--muted); font-size: .82rem; }
+  .spdm-bus { text-align: center; color: var(--muted); font-size: .8rem;
+              letter-spacing: .09em; text-transform: uppercase; padding-bottom: .55rem; }
+  .spdm-lane { display: grid; grid-template-columns: minmax(9rem, 1fr) 2fr minmax(9rem, 1fr);
+               gap: 1rem; align-items: center; min-height: 4.2rem;
+               border-top: 1px dashed var(--line); color: var(--muted); }
+  .spdm-lane .side { font-size: .85rem; }
+  .spdm-lane .side:last-child { text-align: right; }
+  .spdm-message { position: relative; text-align: center; padding: .5rem 1.8rem;
+                  font-size: .9rem; color: var(--muted); }
+  .spdm-message::before { content: ""; position: absolute; left: 0; right: 0;
+                          top: 50%; border-top: 2px solid var(--line); }
+  .spdm-message::after { content: ""; position: absolute; right: 0; top: calc(50% - 4px);
+                         border-left: 8px solid var(--line); border-top: 5px solid transparent;
+                         border-bottom: 5px solid transparent; }
+  .spdm-lane.reverse .spdm-message::after { right: auto; left: 0;
+                                             border-left: 0; border-right: 8px solid var(--line); }
+  .spdm-message span { position: relative; z-index: 1; display: inline-block;
+                       max-width: 100%; padding: .15rem .55rem;
+                       background: var(--panel); }
+  .spdm-lane.active .spdm-message { color: var(--wait); }
+  .spdm-lane.active .spdm-message::before { border-color: var(--wait);
+                                             animation: spdm-pulse 1s ease-in-out infinite; }
+  .spdm-lane.active .spdm-message::after { border-left-color: var(--wait);
+                                            border-right-color: var(--wait); }
+  .spdm-lane.done .spdm-message { color: var(--pass); }
+  .spdm-lane.done .spdm-message::before { border-color: var(--pass); }
+  .spdm-lane.done .spdm-message::after { border-left-color: var(--pass);
+                                          border-right-color: var(--pass); }
+  .spdm-lane.bad .spdm-message { color: var(--fail); }
+  .spdm-lane.bad .spdm-message::before { border-color: var(--fail); }
+  .spdm-lane.bad .spdm-message::after { border-left-color: var(--fail);
+                                         border-right-color: var(--fail); }
+  .spdm-lane[data-n="3"] .spdm-message span,
+  .spdm-lane[data-n="4"] .spdm-message span { font-weight: 700; }
+  .sign-flow .host-action { grid-column: 1; padding: .45rem; }
+  .sign-flow .digest-summary { grid-column: 1 / -1; }
+  .sign-flow .digest-summary span { overflow-wrap: anywhere; white-space: pre-line; }
+  .sign-flow .host-action::before,
+  .sign-flow .host-action::after { display: none; }
+  .sign-flow .host-action span { border: 1px solid var(--line); }
+  .sign-flow .active .host-action span { border-color: var(--wait); }
+  .sign-flow .done .host-action span { border-color: var(--pass); }
+  .sign-flow .bad .host-action span { border-color: var(--fail); }
+  .sign-flow .tamper-lane { display: none; }
+  .sign-flow.tampered .tamper-lane { display: grid; }
+  @keyframes spdm-pulse { 50% { opacity: .35; } }
+  @media (max-width: 700px) {
+    .spdm-actors, .spdm-lane { grid-template-columns: minmax(5.5rem, 1fr) 2fr minmax(5.5rem, 1fr);
+                               gap: .35rem; }
+    .spdm-bus { font-size: .7rem; }
+    .spdm-lane .side { display: none; }
+    .spdm-message { grid-column: 1 / -1; padding-left: 1rem; padding-right: 1rem; }
+  }
+
+  /* Live PQ TLS flow */
+  .tls-flow { margin: 1.2rem 0 1.5rem; }
+  .tls-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+               border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+               margin: 1rem 0 1.2rem; }
+  .tls-fact { padding: .8rem 1rem; border-right: 1px solid var(--line); }
+  .tls-fact:last-child { border-right: 0; }
+  .tls-fact span { display: block; color: var(--muted); font-size: .72rem;
+                   text-transform: uppercase; letter-spacing: .05em; }
+  .tls-fact b { display: block; margin-top: .3rem; font-size: .88rem;
+                overflow-wrap: anywhere; }
+  .tls-actors, .tls-lane { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+                           gap: 1rem; }
+  .tls-actors { align-items: end; margin-bottom: .65rem; }
+  .tls-actor { padding: .7rem .85rem; border-top: 3px solid var(--accent);
+               background: var(--panel-2); text-align: center; }
+  .tls-actor b { display: block; font-size: 1rem; }
+  .tls-actor span { color: var(--muted); font-size: .82rem; }
+  .tls-lane { align-items: center; min-height: 4.2rem;
+              border-top: 1px dashed var(--line); color: var(--muted); }
+  .tls-message { position: relative; text-align: center; padding: .5rem 1.5rem;
+                 font-size: .9rem; color: var(--muted); }
+  .tls-message span { position: relative; z-index: 1; display: inline-block;
+                      padding: .15rem .55rem; background: var(--panel); }
+  .tls-message::before { content: ""; position: absolute; left: 0; right: 0;
+                         top: 50%; border-top: 2px solid var(--line); }
+  .tls-message::after { content: ""; position: absolute; right: 0; top: calc(50% - 4px);
+                        border-left: 8px solid var(--line); border-top: 5px solid transparent;
+                        border-bottom: 5px solid transparent; }
+  .tls-message.reverse::after { right: auto; left: 0; border-left: 0;
+                                border-right: 8px solid var(--line); }
+  .tls-message.client-server { grid-column: 1 / 3; }
+  .tls-message.server-mcu { grid-column: 2 / 4; }
+  .tls-message.mcu-tpm { grid-column: 3 / 5; }
+  .tls-message.server-tpm { grid-column: 2 / 5; }
+  .tls-message.host-local { grid-column: 2; padding: .45rem; }
+  .tls-message.client-local { grid-column: 1; padding: .45rem; }
+  .tls-message.host-local::before,
+  .tls-message.host-local::after,
+  .tls-message.client-local::before,
+  .tls-message.client-local::after { display: none; }
+  .tls-message.host-local span,
+  .tls-message.client-local span { border: 1px solid var(--line); }
+  .tls-lane.active .tls-message.host-local span,
+  .tls-lane.active .tls-message.client-local span { border-color: var(--wait); }
+  .tls-lane.done .tls-message.host-local span,
+  .tls-lane.done .tls-message.client-local span { border-color: var(--pass); }
+  .tls-lane.bad .tls-message.host-local span,
+  .tls-lane.bad .tls-message.client-local span { border-color: var(--fail); }
+  .tls-route { display: none; }
+  .tls-lane.active .tls-message { color: var(--wait); }
+  .tls-lane.active .tls-message::before { border-color: var(--wait);
+                                           animation: spdm-pulse 1s ease-in-out infinite; }
+  .tls-lane.active .tls-message::after { border-left-color: var(--wait);
+                                          border-right-color: var(--wait); }
+  .tls-lane.done .tls-message { color: var(--pass); }
+  .tls-lane.done .tls-message::before { border-color: var(--pass); }
+  .tls-lane.done .tls-message::after { border-left-color: var(--pass);
+                                        border-right-color: var(--pass); }
+  .tls-lane.bad .tls-message { color: var(--fail); }
+  .tls-lane.bad .tls-message::before { border-color: var(--fail); }
+  .tls-lane.bad .tls-message::after { border-left-color: var(--fail);
+                                       border-right-color: var(--fail); }
+  .tls-lane[data-n="6"] .tls-message span,
+  .tls-lane[data-n="8"] .tls-message span { font-weight: 700; }
+  @media (max-width: 700px) {
+    .tls-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .tls-fact:nth-child(2) { border-right: 0; }
+    .tls-fact:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+    .tls-actors { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .35rem; }
+    .tls-lane { display: block; min-height: 0; padding: .65rem 0; }
+    .tls-actor { padding: .55rem .25rem; }
+    .tls-actor b { font-size: .85rem; }
+    .tls-actor span { font-size: .7rem; }
+    .tls-message { padding-left: .6rem; padding-right: .6rem; }
+    .tls-message::before, .tls-message::after { display: none; }
+    .tls-route { display: block; color: var(--muted); font-size: .68rem;
+                 font-weight: 500; margin-bottom: .25rem; }
+    #tls-steps li { grid-template-columns: 1.7rem minmax(0, 1fr); align-items: start; }
+    #tls-steps .detail { grid-column: 2; text-align: left; font-size: .82rem;
+               overflow-wrap: anywhere; }
+  }
+
+  /* Verdict */
+  .verdict { margin-top: 1rem; border-radius: 10px; padding: 1.1rem 1.2rem;
+             border: 1px solid var(--line); background: var(--panel-2); }
+  .verdict .big { font-size: 1.9rem; font-weight: 700; letter-spacing: -0.01em; }
+  .verdict .why { color: var(--muted); font-size: .98rem; margin-top: .25rem; }
+  .verdict.pass { border-color: #1f5c39; background: #10281b; }
+  .verdict.pass .big { color: var(--pass); }
+  .verdict.fail { border-color: #6b2b2f; background: #2a1416; }
+  .verdict.fail .big { color: var(--fail); }
+
+  /* Size comparison */
+  .bar-row { margin: .85rem 0; }
+  .bar-label { display: flex; justify-content: space-between; font-size: .95rem;
+               margin-bottom: .3rem; }
+  .bar-label .n { font-variant-numeric: tabular-nums; color: var(--fg); font-weight: 600; }
+  .bar { height: 1.5rem; border-radius: 6px; background: var(--panel-2); overflow: hidden; }
+  .bar span { display: block; height: 100%; width: 0;
+              transition: width .7s cubic-bezier(.2,.7,.3,1); }
+  .bar span.pq { background: var(--pq); }
+  .bar span.cl { background: var(--classical); }
+  .ratio { color: var(--muted); font-size: .95rem; margin-top: .7rem; }
+  .ratio b { color: var(--fg); }
+
+  table.cmp { width: 100%; border-collapse: collapse; font-size: .96rem; }
+  table.cmp th { text-align: right; font-weight: 600; color: var(--muted);
+                 font-size: .8rem; letter-spacing: .05em; text-transform: uppercase;
+                 padding: 0 0 .45rem; border-bottom: 1px solid var(--line); }
+  table.cmp th:first-child { text-align: left; }
+  table.cmp td { padding: .5rem 0; border-bottom: 1px dashed var(--line);
+                 text-align: right; font-variant-numeric: tabular-nums;
+                 font-weight: 600; }
+  table.cmp td:first-child { text-align: left; font-weight: 500;
+                             color: var(--muted); white-space: nowrap; }
+  table.cmp tr:last-child td { border-bottom: 0; }
+  table.cmp tr.row-pq td { color: var(--fg); }
+  table.cmp tr.row-pq td:first-child { color: var(--fg); font-weight: 600; }
+
+  table.kv { width: 100%; border-collapse: collapse; font-size: .98rem; }
+  table.kv td { padding: .42rem 0; border-bottom: 1px dashed var(--line); }
+  table.kv td:last-child { text-align: right; font-variant-numeric: tabular-nums;
+                           font-weight: 600; }
+  table.kv tr:last-child td { border-bottom: 0; }
+
+  pre.log { margin: 0; max-height: 15rem; overflow: auto; font-size: .85rem;
+            line-height: 1.5; color: var(--muted); white-space: pre-wrap;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .note { color: var(--muted); font-size: .92rem; margin-top: .8rem; }
+
+  /* Byte mosaic: one cell per signature byte. Canvas rather than DOM nodes -
+     4627 elements is sluggish to lay out, a canvas is instant. */
+  .mosaics { display: flex; gap: 1.6rem; align-items: flex-start; flex-wrap: wrap; }
+  .mosaic { margin: 0; flex: 0 1 auto; min-width: 0; }
+  .mosaic.grow { flex: 1 1 auto; }
+  /* Fixed column: otherwise the classical canvas (300px by default, ~96px
+     once drawn) changes width between runs and the post-quantum grid is laid
+     out against last run's geometry. */
+  #m-cl-col { flex: 0 0 165px; min-width: 0; display: flex;
+              flex-direction: column; gap: 1.1rem; }
+  .mosaic figcaption { display: flex; align-items: center; gap: .5rem;
+                       font-size: .95rem; margin-bottom: .5rem;
+                       white-space: nowrap; }
+  .mosaic figcaption .n { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .mosaic canvas { display: block; max-width: 100%; border-radius: 6px;
+                   background: var(--panel-2); }
+  #m-pq { width: 100%; }
+  .tag { width: .8rem; height: .8rem; border-radius: 3px; flex: none;
+         display: inline-block; vertical-align: middle; }
+  /* The classical caption grows from "-" to "64 cells" mid-run. Left as a
+     nowrap flex line its column widens by 35px at that moment, after the
+     post-quantum grid beside it has already been laid out. Letting it wrap
+     inside its reserved column keeps the geometry fixed for the whole run. */
+  #m-cl-col figcaption { display: block; white-space: normal; }
+  .tag.pq { background: var(--pq); }
+  .tag.cl { background: var(--classical); }
+  .mosaic.flash canvas { animation: tamperflash .55s ease-out 2; }
+  @keyframes tamperflash {
+    0%   { box-shadow: 0 0 0 0 rgba(229,72,77,.85); }
+    100% { box-shadow: 0 0 0 14px rgba(229,72,77,0); }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Post-Quantum TPM</h1>
+  <span class="sub">wolfTPM &middot; wolfCrypt &middot; ML-DSA on real silicon</span>
+  <span class="chip"><span class="dot" id="conn-dot"></span>TPM <b id="tpm-id">detecting&hellip;</b></span>
+</header>
+
+<div class="claim" id="claim">
+  <span id="claim-text">A post-quantum TPM, driven by wolfTPM. Keys are generated
+  inside the chip and never leave it &mdash; that same silicon does the work on
+  every tab below, live, including the TLS 1.3 handshake.</span>
+  <span class="cue" id="claim-cue">Press a button to run it yourself</span>
+</div>
+
+<nav class="tabs">
+  <button class="tab active" data-tab="sign">Sign &amp; verify</button>
+  <button class="tab" data-tab="seal">Sealed secret</button>
+  <button class="tab" data-tab="ek">EK certificates</button>
+  <button class="tab" data-tab="pcr">Measured boot</button>
+  <button class="tab" data-tab="spdm">SPDM</button>
+  <button class="tab" data-tab="tls">PQ TLS</button>
+  <button class="tab" data-tab="console">Console</button>
+  <button id="btn-attract" class="tab auto" title="Run the demo on a loop when nobody is touching it">Auto</button>
+</nav>
+
+<main id="view-sign" class="view">
+  <section class="panel">
+    <h2>Run</h2>
+    <div class="controls">
+      <button class="primary" id="btn-run">Sign &amp; verify</button>
+      <button class="danger" id="btn-tamper">Tamper the signature</button>
+      <span id="param-wrap"></span>
+      <button id="btn-reset" title="Pulse the TPM reset line">Reset TPM</button>
+    </div>
+
+    <div class="spdm-flow sign-flow" id="sign-flow" aria-label="Live signing data flow">
+      <div class="spdm-actors">
+        <div class="spdm-actor"><b>Host MCU</b><span>PSoC C3 &middot; wolfCrypt verifier</span></div>
+        <div class="spdm-bus" id="sign-bus">wolfTPM over I2C &middot; 1000 kHz</div>
+        <div class="spdm-actor"><b>TPM</b><span>SLB9678 &middot; ML-DSA signer</span></div>
+      </div>
+      <div class="spdm-lane" data-phase="digest">
+        <div class="spdm-message host-action digest-summary"><span>Prepare SHA-256 digest</span></div>
+      </div>
+      <div class="spdm-lane" data-phase="key">
+        <span class="side">Request key creation</span>
+        <div class="spdm-message"><span>Create ML-DSA key pair</span></div>
+        <span class="side">Keep private key inside</span>
+      </div>
+      <div class="spdm-lane" data-phase="request">
+        <span class="side">Submit digest</span>
+        <div class="spdm-message"><span>Sign digest with TPM-held key</span></div>
+        <span class="side">Perform ML-DSA signing</span>
+      </div>
+      <div class="spdm-lane reverse" data-phase="signature">
+        <span class="side">Receive public data</span>
+        <div class="spdm-message"><span>Return public key and ML-DSA signature</span></div>
+        <span class="side">Private key never leaves</span>
+      </div>
+      <div class="spdm-lane tamper-lane" data-phase="tamper">
+        <div class="spdm-message host-action"><span>Flip one signature bit for the negative test</span></div>
+      </div>
+      <div class="spdm-lane" data-phase="verify">
+        <div class="spdm-message host-action"><span>Verify signature with wolfCrypt</span></div>
+      </div>
+    </div>
+
+    <ol class="steps" id="steps">
+      <li data-k="startup"><span class="mark">1</span><span>TPM ready</span><span class="detail"></span></li>
+      <li data-k="key"><span class="mark">2</span><span>TPM generates ML-DSA key pair</span><span class="detail"></span></li>
+      <li data-k="sign"><span class="mark">3</span><span>TPM signs digest (private key never leaves)</span><span class="detail"></span></li>
+      <li data-k="tamper"><span class="mark">!</span><span>Signature bit flipped</span><span class="detail"></span></li>
+      <li data-k="verify"><span class="mark">4</span><span>MCU verifies with wolfCrypt</span><span class="detail"></span></li>
+    </ol>
+
+    <div class="verdict" id="verdict">
+      <div class="big" id="verdict-big">Ready</div>
+      <div class="why" id="verdict-why">Press &ldquo;Sign &amp; verify&rdquo; to run on the TPM.</div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Post-quantum vs classical &mdash; same TPM, same digest</h2>
+
+    <div class="bar-row">
+      <div class="bar-label"><span id="pq-label">ML-DSA-87 signature</span><span class="n" id="pq-n">&mdash;</span></div>
+      <div class="bar"><span class="pq" id="pq-bar"></span></div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-label"><span>ECDSA P-384 signature</span><span class="n" id="c384-n">&mdash;</span></div>
+      <div class="bar"><span class="cl" id="c384-bar"></span></div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-label"><span>ECDSA P-256 signature</span><span class="n" id="cl-n">&mdash;</span></div>
+      <div class="bar"><span class="cl" id="cl-bar"></span></div>
+    </div>
+    <div class="ratio" id="ratio"></div>
+
+    <h2 style="margin-top:1.5rem">What it costs</h2>
+    <table class="cmp">
+      <thead>
+        <tr><th>Algorithm</th><th>Signature</th><th>TPM key gen</th><th>TPM sign (est.)</th><th>Response transfer</th><th>Sign total</th></tr>
+      </thead>
+      <tbody>
+        <tr class="row-pq">
+          <td><span class="tag pq"></span> ML-DSA-<span id="c-pq-set">87</span></td>
+          <td id="c-pq-sz">&mdash;</td><td id="c-pq-kg">&mdash;</td><td id="c-pq-tpm">&mdash;</td><td id="c-pq-xfer">&mdash;</td><td id="c-pq-sg">&mdash;</td>
+        </tr>
+        <tr>
+          <td><span class="tag cl"></span> ECDSA P-384</td>
+          <td id="c-384-sz">&mdash;</td><td id="c-384-kg">&mdash;</td><td id="c-384-tpm">&mdash;</td><td id="c-384-xfer">&mdash;</td><td id="c-384-sg">&mdash;</td>
+        </tr>
+        <tr>
+          <td><span class="tag cl"></span> ECDSA P-256</td>
+          <td id="c-256-sz">&mdash;</td><td id="c-256-kg">&mdash;</td><td id="c-256-tpm">&mdash;</td><td id="c-256-xfer">&mdash;</td><td id="c-256-sg">&mdash;</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="note" id="verify-note"></div>
+  </section>
+
+  <section class="panel" style="grid-column: 1 / -1;">
+    <h2>The signature itself &mdash; one cell per byte</h2>
+    <div class="mosaics">
+      <figure class="mosaic grow" id="m-pq-fig">
+        <figcaption><span class="tag pq"></span><b id="m-pq-title">ML-DSA-87</b>
+          <span class="n" id="m-pq-n">&mdash;</span></figcaption>
+        <canvas id="m-pq"></canvas>
+      </figure>
+      <div class="mosaic-col" id="m-cl-col">
+        <figure class="mosaic" id="m-384-fig">
+          <figcaption><span class="tag cl"></span><b>ECDSA P-384</b>
+            <span class="n" id="m-384-n">&mdash;</span></figcaption>
+          <canvas id="m-384" width="0" height="0"></canvas>
+        </figure>
+        <figure class="mosaic" id="m-cl-fig">
+          <figcaption><span class="tag cl"></span><b>ECDSA P-256</b>
+            <span class="n" id="m-cl-n">&mdash;</span></figcaption>
+          <canvas id="m-cl" width="0" height="0"></canvas>
+        </figure>
+      </div>
+    </div>
+    <div class="note" id="m-note">All three grids are drawn at the same scale, and every
+      cell is one byte of a signature this TPM just produced.</div>
+  </section>
+
+</main>
+
+<main id="view-seal" class="view" hidden>
+  <section class="panel" style="grid-column: 1 / -1;">
+    <h2>Sealed secret &mdash; released only in the right state</h2>
+    <p class="lead">A TPM seals a secret to a system state, releasing it only
+      when the current measurement matches. Choose the matching PCR to see the
+      plaintext returned, or change PCR before unsealing to see the TPM reject
+      the same blob. <b>That refusal is the security feature working, not a
+      failure.</b></p>
+    <div class="controls" style="margin-bottom:1rem">
+      <button class="primary" id="btn-seal">Run it</button>
+      <div class="segmented" id="seal-mode" role="group" aria-label="PCR policy outcome">
+        <button type="button" class="selected" data-mode="access">PCR 000&hellip; &middot; Access</button>
+        <button type="button" data-mode="deny">PCR changed &middot; Deny</button>
+      </div>
+    </div>
+    <div class="seal-visual" id="seal-visual" aria-label="Live sealed secret state flow">
+      <div class="seal-build">
+        <div class="seal-inputs">
+          <div class="seal-node" id="seal-secret-node">
+            <span class="kicker">Secret</span>
+            <strong id="seal-secret-value">OktoberTech2026</strong>
+            <small id="seal-secret-size">15 B plaintext</small>
+          </div>
+          <div class="seal-node" id="seal-pcr-node">
+            <span class="kicker">Platform state</span>
+            <strong>PCR <span id="seal-pcr-index">16</span></strong>
+            <small id="seal-pcr-value">Waiting for measurement</small>
+          </div>
+        </div>
+        <div class="seal-arrow" aria-hidden="true"></div>
+        <div class="seal-node seal-tpm" id="seal-tpm-node">
+          <span class="kicker">Inside the TPM</span>
+          <strong>Policy seal</strong>
+          <small id="seal-policy-value">Bind secret to the PCR value</small>
+        </div>
+        <div class="seal-arrow" aria-hidden="true"></div>
+        <div class="seal-node" id="seal-blob-node">
+          <span class="kicker">Safe outside the TPM</span>
+          <strong id="seal-blob-size">Sealed blob</strong>
+          <div class="seal-blob-bar" aria-hidden="true"><span></span><span></span></div>
+          <small id="seal-blob-parts">Public policy + encrypted private data</small>
+        </div>
+      </div>
+      <div class="seal-outcomes">
+        <div class="seal-outcome" id="seal-match-path">
+          <span class="state">PCR match</span>
+          <div><b>Load the same blob</b><small>Current PCR equals the sealed policy</small></div>
+          <span class="result" id="seal-match-result">Pending</span>
+        </div>
+        <div class="seal-outcome" id="seal-change-path">
+          <span class="state">PCR changed</span>
+          <div><b>Load the same blob</b><small id="seal-changed-pcr">PCR extend changes the platform state</small></div>
+          <span class="result" id="seal-change-result">Pending</span>
+        </div>
+      </div>
+    </div>
+    <ol class="steps" id="seal-steps">
+      <li data-k="reset"><span class="mark">1</span><span>PCR 16 reset to a known measurement</span><span class="detail"></span></li>
+      <li data-k="create"><span class="mark">2</span><span>Secret sealed to that measurement</span><span class="detail"></span></li>
+      <li data-k="before"><span class="mark">3</span><span>TPM releases the secret</span><span class="detail"></span></li>
+      <li data-k="extend"><span class="mark">!</span><span>Measurement changes &mdash; PCR extended</span><span class="detail"></span></li>
+      <li data-k="after"><span class="mark">4</span><span>TPM refuses the same sealed blob</span><span class="detail"></span></li>
+    </ol>
+    <div class="verdict" id="seal-verdict">
+      <div class="big" id="seal-big">Running&hellip;</div>
+      <div class="why" id="seal-why">Talking to the TPM.</div>
+    </div>
+  </section>
+
+</main>
+
+<main id="view-ek" class="view" hidden>
+  <section class="panel" style="grid-column: 1 / -1;">
+    <h2>Endorsement certificates &mdash; issued at manufacture</h2>
+    <p class="lead">Every TPM leaves the factory with certificates written into
+      its own storage, signed by the manufacturer, stating what it is. The chip
+      does not merely claim its identity &mdash; the vendor attests to it.</p>
+    <div class="controls" style="margin-bottom:1rem">
+      <button class="primary" id="btn-ek">Read certificates</button>
+    </div>
+    <div class="note" id="ek-summary" style="margin-top:0"></div>
+    <table class="cmp">
+      <thead>
+        <tr><th>NV handle</th><th>Key</th><th>Hash</th><th>Certificate</th>
+          <th>Serial</th><th>Matches EK</th><th class="left">Issued by</th></tr>
+      </thead>
+      <tbody id="ek-rows"></tbody>
+    </table>
+    <div class="note" id="ek-chain"></div>
+  </section>
+
+</main>
+
+<main id="view-pcr" class="view" hidden>
+  <section class="panel" style="grid-column: 1 / -1;">
+    <h2>Measured boot &mdash; what the TPM has been told</h2>
+    <p class="lead">A platform configuration register cannot be written, only
+      <i>extended</i>: the new value is the hash of the old value concatenated
+      with the new measurement. That is what makes a PCR a record of everything
+      measured, in order, and why a changed measurement can never be quietly
+      walked back. This is the state the sealed secret is bound to.</p>
+    <div class="controls" style="margin-bottom:1rem">
+      <button class="primary" id="btn-pcr">Read all PCRs</button>
+      <button id="btn-pcr-extend">Extend PCR 16</button>
+      <button id="btn-pcr-reset">Reset PCR 16</button>
+    </div>
+    <div class="note" id="pcr-banks" style="margin-top:0"></div>
+    <div class="pcrgrid" id="pcr-grid"></div>
+    <div class="note" id="pcr-note"></div>
+  </section>
+</main>
+
+<main id="view-spdm" class="view" hidden>
+  <section class="panel" style="grid-column: 1 / -1;">
+    <h2>SPDM &mdash; an encrypted channel to the TPM</h2>
+    <p class="lead">The bus between a host and a TPM is plaintext, whether it
+      is SPI or, as on this board, I2C: a cheap logic analyser clipped to it
+      reads every command and every response.
+      SPDM negotiates a session key so the bus carries ciphertext instead.
+      wolfTPM implements the responder as well as the client, so the whole
+      thing can be demonstrated end to end.</p>
+    <div class="controls" style="margin-bottom:1rem">
+      <button class="primary" id="btn-spdm">Run it</button>
+      <span class="n" id="spdm-note" style="color:var(--muted)"></span>
+    </div>
+
+    <div class="verdict" id="spdm-silicon" style="margin-bottom:1.2rem">
+      <div class="big" id="spdm-sil-big" style="font-size:1.1rem">The fitted part</div>
+      <div class="why" id="spdm-sil-why">Not yet probed.</div>
+    </div>
+
+    <div class="spdm-flow" id="spdm-flow" aria-label="Live SPDM data flow">
+      <div class="spdm-actors">
+        <div class="spdm-actor"><b>Host MCU</b><span>PSoC C3 &middot; requester</span></div>
+        <div class="spdm-bus">SPDM over I2C</div>
+        <div class="spdm-actor"><b>TPM</b><span>SLB9678 &middot; responder</span></div>
+      </div>
+      <div class="spdm-lane" data-n="1">
+        <span class="side">Verify identity</span>
+        <div class="spdm-message"><span>Authenticate pinned responder key</span></div>
+        <span class="side">Prove identity</span>
+      </div>
+      <div class="spdm-lane reverse" data-n="2">
+        <span class="side">Create context</span>
+        <div class="spdm-message"><span>Negotiate SPDM context</span></div>
+        <span class="side">Accept context</span>
+      </div>
+      <div class="spdm-lane" data-n="3">
+        <span class="side">Derive session key</span>
+        <div class="spdm-message"><span>Key exchange &middot; secured session</span></div>
+        <span class="side">Derive session key</span>
+      </div>
+      <div class="spdm-lane" data-n="4">
+        <span class="side">Encrypt command</span>
+        <div class="spdm-message"><span>Encrypted GetCapabilities</span></div>
+        <span class="side">Decrypt and execute</span>
+      </div>
+      <div class="spdm-lane reverse" data-n="4">
+        <span class="side">Decrypt response</span>
+        <div class="spdm-message"><span>Ciphertext response &middot; manufacturer and firmware</span></div>
+        <span class="side">Encrypt response</span>
+      </div>
+      <div class="spdm-lane" data-n="5">
+        <span class="side">Discard session</span>
+        <div class="spdm-message"><span>Close secured session</span></div>
+        <span class="side">Discard session</span>
+      </div>
+    </div>
+
+    <h2 id="spdm-heading">Secured session against the wolfTPM firmware TPM</h2>
+    <ol class="steps" id="spdm-steps"></ol>
+    <div class="verdict" id="spdm-verdict">
+      <div class="big" id="spdm-big">Not run</div>
+      <div class="why" id="spdm-why">Press Run it.</div>
+    </div>
+  </section>
+</main>
+
+<main id="view-tls" class="view" hidden>
+  <section class="panel" style="grid-column: 1 / -1;">
+    <h2>Post-quantum TLS 1.3 &mdash; identity key inside the TPM</h2>
+    <p class="lead">A TLS server proves its identity by signing the handshake
+      with a private key. Here that key is generated and secured inside a TPM,
+      so it never leaves hardware. With ML-DSA for the signature and ML-KEM
+      for the key exchange, the whole handshake is quantum-resistant and
+      hardware-anchored rather than reliant on a file on disk.</p>
+    <div class="verdict" id="tls-silicon" style="margin-bottom:1.2rem">
+      <div class="big" style="font-size:1.1rem">How the board integrates into the handshake</div>
+      <div class="why">The TLS stack runs on the host PC but holds no private
+        key. When the server needs to sign its CertificateVerify, it passes
+        the handshake digest to the board, which signs it inside its socketed
+        TPM and returns an ML-DSA signature. Current firmware signs the
+        pre-hashed variant of ML-DSA, which has no official TLS 1.3 code
+        point, so this demo uses a temporary value from the private-use range.
+        Production firmware will support the standard form and remove the
+        need for it. The TLS stack patch is included in patches/.</div>
+    </div>
+    <div class="tls-facts" aria-label="Post-quantum TLS negotiated properties">
+      <div class="tls-fact"><span>TPM identity</span><b id="tls-fact-key">Awaiting public key</b></div>
+      <div class="tls-fact"><span>Certificate chain</span><b id="tls-fact-certs">Not generated</b></div>
+      <div class="tls-fact"><span>Key agreement</span><b id="tls-fact-kem">ML-KEM-768</b></div>
+      <div class="tls-fact"><span>Record protection</span><b id="tls-fact-channel">Not established</b></div>
+    </div>
+    <div class="tls-flow" id="tls-flow" aria-label="Live post-quantum TLS data flow">
+      <div class="tls-actors">
+        <div class="tls-actor"><b>TLS Client</b><span>certificate verifier</span></div>
+        <div class="tls-actor"><b>Host TLS Server</b><span>wolfSSL &middot; no identity private key</span></div>
+        <div class="tls-actor"><b>PSoC C3</b><span>UART to wolfTPM bridge</span></div>
+        <div class="tls-actor"><b>SLB9678 TPM</b><span>ML-DSA identity key</span></div>
+      </div>
+      <div class="tls-lane" data-n="1" data-phase="identity">
+        <div class="tls-message server-tpm reverse"><b class="tls-route">TPM &rarr; PSoC C3 &rarr; TLS server</b><span data-default="Read TPM-held ML-DSA public key">Read TPM-held ML-DSA public key</span></div>
+      </div>
+      <div class="tls-lane" data-n="2" data-phase="certificate">
+        <div class="tls-message host-local"><b class="tls-route">Host TLS server</b><span data-default="Create temporary CA and issue leaf certificate">Create temporary CA and issue leaf certificate</span></div>
+      </div>
+      <div class="tls-lane" data-n="3" data-phase="server">
+        <div class="tls-message host-local"><b class="tls-route">Host TLS server</b><span data-default="Start TLS 1.3 server &middot; ML-KEM enabled">Start TLS 1.3 server &middot; ML-KEM enabled</span></div>
+      </div>
+      <div class="tls-lane" data-n="4" data-phase="clienthello">
+        <div class="tls-message client-server"><b class="tls-route">TLS client &rarr; TLS server</b><span data-default="ClientHello &middot; offer ML-KEM-768 and AES-256-GCM">ClientHello &middot; offer ML-KEM-768 and AES-256-GCM</span></div>
+      </div>
+      <div class="tls-lane" data-n="4" data-phase="serverhello">
+        <div class="tls-message client-server reverse"><b class="tls-route">TLS server &rarr; TLS client</b><span data-default="ServerHello &middot; select ML-KEM-768">ServerHello &middot; select ML-KEM-768</span></div>
+      </div>
+      <div class="tls-lane" data-n="5" data-phase="certchain">
+        <div class="tls-message client-server reverse"><b class="tls-route">TLS server &rarr; TLS client</b><span data-default="Certificate &middot; leaf contains TPM ML-DSA public key">Certificate &middot; leaf contains TPM ML-DSA public key</span></div>
+      </div>
+      <div class="tls-lane" data-n="6" data-phase="request">
+        <div class="tls-message server-tpm"><b class="tls-route">TLS server &rarr; PSoC C3 &rarr; TPM</b><span data-default="Delegate SHA-256 CertificateVerify digest">Delegate SHA-256 CertificateVerify digest</span></div>
+      </div>
+      <div class="tls-lane" data-n="6" data-phase="signature">
+        <div class="tls-message server-tpm reverse"><b class="tls-route">TPM &rarr; PSoC C3 &rarr; TLS server</b><span data-default="Return TPM-generated ML-DSA signature">Return TPM-generated ML-DSA signature</span></div>
+      </div>
+      <div class="tls-lane" data-n="6" data-phase="certverify">
+        <div class="tls-message client-server reverse"><b class="tls-route">TLS server &rarr; TLS client</b><span data-default="CertificateVerify &middot; prove possession of TPM private key">CertificateVerify &middot; prove possession of TPM private key</span></div>
+      </div>
+      <div class="tls-lane" data-n="7" data-phase="verify">
+        <div class="tls-message client-local"><b class="tls-route">TLS client</b><span data-default="Verify CA chain and ML-DSA handshake signature">Verify CA chain and ML-DSA handshake signature</span></div>
+      </div>
+      <div class="tls-lane" data-n="7" data-phase="finished">
+        <div class="tls-message client-server reverse"><b class="tls-route">TLS client &harr; TLS server</b><span data-default="Exchange and verify TLS 1.3 Finished">Exchange and verify TLS 1.3 Finished</span></div>
+      </div>
+      <div class="tls-lane" data-n="8" data-phase="channel">
+        <div class="tls-message client-server"><b class="tls-route">TLS client &harr; TLS server</b><span data-default="Encrypted channel not established">Encrypted channel not established</span></div>
+      </div>
+    </div>
+    <div class="controls" style="margin-bottom:1rem">
+      <button class="primary" id="btn-tls">Run it</button>
+      <span class="n" id="tls-note" style="color:var(--muted)"></span>
+    </div>
+    <ol class="steps" id="tls-steps">
+      <li data-n="1"><span class="mark">1</span><span>Board reports its TPM-held ML-DSA identity key</span><span class="detail"></span></li>
+      <li data-n="2"><span class="mark">2</span><span>Temporary CA issues a leaf certificate for that key</span><span class="detail"></span></li>
+      <li data-n="3"><span class="mark">3</span><span>TLS server listening, signing delegated to the board</span><span class="detail"></span></li>
+      <li data-n="4"><span class="mark">4</span><span>ClientHello and ServerHello negotiate ML-KEM-768</span><span class="detail"></span></li>
+      <li data-n="5"><span class="mark">5</span><span>Client validates the temporary CA and TPM identity certificate</span><span class="detail"></span></li>
+      <li data-n="6"><span class="mark">6</span><span>TPM signs CertificateVerify with its ML-DSA private key</span><span class="detail"></span></li>
+      <li data-n="7"><span class="mark">7</span><span>Client verifies the signature and both peers verify Finished</span><span class="detail"></span></li>
+      <li data-n="8"><span class="mark">8</span><span>TLS 1.3 encrypted channel is established</span><span class="detail"></span></li>
+    </ol>
+    <div class="verdict" id="tls-verdict">
+      <div class="big" id="tls-big">Not run</div>
+      <div class="why" id="tls-why">Press Run it.</div>
+    </div>
+  </section>
+</main>
+
+<main id="view-console" class="view" hidden>
+  <section class="panel" style="grid-column: 1 / -1;">
+    <h2>Board console</h2>
+    <p>Everything the board prints that is not a demo event: the bootloader
+    verifying this image before it ran, and anything the firmware logs.</p>
+    <button class="primary" id="btn-reset-board">Reset the board</button>
+    <span class="n" style="color:var(--muted)">Resets the MCU and the TPM together; their reset lines are shared.</span>
+    <pre class="log" id="console-log"></pre>
+  </section>
+</main>
+
+<main class="view">
+  <section class="panel" style="grid-column: 1 / -1;">
+    <h2>Event stream</h2>
+    <pre class="log" id="log"></pre>
+  </section>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var running = false;
+  var tampered = false;
+  var pqBytes = 0, clBytes = 0, c384Bytes = 0;
+  var pqSignMs = 0, clSignMs = 0;
+  var paramSets = [87];
+  var attractOn = true;
+  var runParamSet = 87;
+  var ekSeen = [];
+
+  function setStep(key, state, detail) {
+    var li = document.querySelector('ol.steps li[data-k="' + key + '"]');
+    if (!li) return;
+    li.classList.remove("active", "done", "bad");
+    if (state) li.classList.add(state);
+    if (detail !== undefined) {
+      li.querySelector(".detail").textContent = detail;
+    }
+  }
+
+  function resetSteps() {
+    ["startup", "key", "sign", "tamper", "verify"].forEach(function (k) {
+      setStep(k, null, "");
+    });
+    $("verdict").className = "verdict";
+    $("verdict-big").textContent = "Running\u2026";
+    $("verdict-why").textContent = "Talking to the TPM.";
+    $("verify-note").textContent = "";
+    resetMosaicState();
+  }
+
+  // ---- Byte mosaic --------------------------------------------------
+  // One cell per signature byte, drawn from the real bytes the TPM returned.
+  // Colour is a lightness ramp inside the palette hue rather than a rainbow:
+  // random bytes in full hue look like television static, which reads as
+  // decoration. A single-hue weave reads as data, and it lets one red cell
+  // carry the whole tamper story.
+  var CELL_MIN = 4, CELL_MAX = 11, CELL_GAP = 1;
+  var mosaic = {
+    pq: { canvas: null, data: null, hue: 176, sat: 38, satRange: 34,
+          lo: 12, hi: 80 },
+    c384: { canvas: null, data: null, hue: 210, sat: 6, satRange: 8,
+            lo: 20, hi: 68 },
+    cl: { canvas: null, data: null, hue: 210, sat: 6, satRange: 8,
+          lo: 20, hi: 68 }
+  };
+  var cellPx = 7;          // shared by both grids so the scale is honest
+  var tamperOffset = -1;
+
+  function pqAvailPx() {
+    var w = $("m-pq").getBoundingClientRect().width;
+    return w > 120 ? w : 560;
+  }
+
+  var CANVAS_ID = { pq: "m-pq", c384: "m-384", cl: "m-cl" };
+
+  function now() {
+    return (window.performance && performance.now)
+      ? performance.now() : Date.now();
+  }
+
+  function b64ToBytes(b64) {
+    var bin = atob(b64), n = bin.length, out = new Uint8Array(n), i;
+    for (i = 0; i < n; i++) { out[i] = bin.charCodeAt(i); }
+    return out;
+  }
+
+  function cellColor(m, v) {
+    // Byte value -> lightness across a wide band. A narrow ramp reads as a
+    // flat block of colour from two metres, which loses the whole point: the
+    // texture is what says "this is data". Saturation also tracks value so
+    // the dark end stays distinguishable rather than collapsing to black.
+    var l = m.lo + (v / 255) * (m.hi - m.lo);
+    var sat = m.sat + (v / 255) * m.satRange;
+    return "hsl(" + m.hue + "," + sat.toFixed(1) + "%," + l.toFixed(1) + "%)";
+  }
+
+  // Lay the PQ grid out to fill its column, then reuse that cell size for the
+  // classical grid. Same scale in both is the entire point of the panel.
+  function layout(n, availPx) {
+    var cell = CELL_MAX, cols, rows;
+    for (; cell >= CELL_MIN; cell--) {
+      cols = Math.floor(availPx / (cell + CELL_GAP));
+      if (cols < 1) { continue; }
+      rows = Math.ceil(n / cols);
+      // Aim for a block wider than tall, so it reads as a page of data.
+      if (rows * (cell + CELL_GAP) <= 360) { break; }
+    }
+    if (cell < CELL_MIN) { cell = CELL_MIN; }
+    cols = Math.max(1, Math.floor(availPx / (cell + CELL_GAP)));
+    return { cell: cell, cols: cols, rows: Math.ceil(n / cols) };
+  }
+
+  /* fluid: the element keeps its CSS width and only the bitmap is set, from
+     the box as actually rendered. Used for the post-quantum grid, whose
+     column width moves as the page below it grows. */
+  function sizeCanvasFluid(cv, rows, cell) {
+    var dpr = window.devicePixelRatio || 1;
+    var w = cv.getBoundingClientRect().width;
+    var h = rows * (cell + CELL_GAP);
+    var ctx;
+    cv.width = Math.round(w * dpr);
+    cv.height = Math.round(h * dpr);
+    cv.style.height = h + "px";
+    ctx = cv.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    return ctx;
+  }
+
+  /* fixed: the classical grid is a small block in a reserved column, so it
+     can be sized outright. */
+  function sizeCanvasFixed(cv, cols, rows, cell) {
+    var dpr = window.devicePixelRatio || 1;
+    var w = cols * (cell + CELL_GAP), h = rows * (cell + CELL_GAP);
+    var ctx;
+    cv.width = Math.round(w * dpr);
+    cv.height = Math.round(h * dpr);
+    cv.style.width = w + "px";
+    cv.style.height = h + "px";
+    ctx = cv.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    return ctx;
+  }
+
+  // Each mosaic animates independently. The generation counter is what makes
+  // that safe: a run that starts while the previous one is still painting
+  // bumps it, and the stale frame callback then does nothing instead of
+  // drawing into a canvas that has been resized underneath it.
+  function paint(m, upto) {
+    var n, cols, cell, ctx, i, x, y;
+    if (!m.canvas || !m.data) { return; }
+    n = m.data.length;
+    cols = m.cols;
+    cell = m.cell;
+    ctx = m.ctx;
+    if (upto === undefined || upto > n) { upto = n; }
+    for (i = m.painted; i < upto; i++) {
+      x = (i % cols) * (cell + CELL_GAP);
+      y = Math.floor(i / cols) * (cell + CELL_GAP);
+      ctx.fillStyle = cellColor(m, m.data[i]);
+      ctx.fillRect(x, y, cell, cell);
+    }
+    m.painted = upto;
+  }
+
+  // Stepped with setTimeout against wall-clock progress, deliberately not
+  // requestAnimationFrame. A booth screen can end up with this tab not
+  // visible - a screensaver, a switched tab, a compositor that thinks the
+  // window is occluded - and Chrome throttles rAF in that state to the point
+  // where the grid simply stops half drawn and stays that way. setTimeout is
+  // throttled too, but it keeps firing, and because progress is computed from
+  // elapsed time rather than frame count a throttled tab jumps straight to a
+  // finished grid instead of a broken one.
+  function animate(m, ms, done) {
+    var gen = ++m.gen;
+    var t0 = now();
+    function step() {
+      var k;
+      if (m.gen !== gen) { return; }
+      k = Math.min(1, (now() - t0) / ms);
+      paint(m, Math.round(m.data.length * k));
+      if (k < 1) { setTimeout(step, 30); }
+      else if (done) { done(); }
+    }
+    step();
+  }
+
+  function markTamper() {
+    var m = mosaic.pq;
+    var cell, cols, ctx, x, y;
+    if (!m.canvas || !m.data || tamperOffset < 0 ||
+        tamperOffset >= m.data.length) { return; }
+    cell = m.cell;
+    cols = m.cols;
+    ctx = m.ctx;
+    x = (tamperOffset % cols) * (cell + CELL_GAP);
+    y = Math.floor(tamperOffset / cols) * (cell + CELL_GAP);
+    ctx.fillStyle = "#e5484d";
+    ctx.fillRect(x, y, cell, cell);
+    // A ring well outside the cell, otherwise one small square in 4627 is
+    // invisible from across a booth.
+    ctx.strokeStyle = "#ff6b70";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(x + cell / 2, y + cell / 2, cell * 2.8, 0, Math.PI * 2);
+    ctx.stroke();
+    $("m-pq-fig").classList.add("flash");
+    setTimeout(function () { $("m-pq-fig").classList.remove("flash"); }, 1400);
+  }
+
+  function showMosaic(which, bytes, doAnimate) {
+    var m = mosaic[which];
+    var lay;
+    m.canvas = $(CANVAS_ID[which]);
+    m.data = bytes;
+    m.painted = 0;
+    m.gen = (m.gen || 0) + 1;
+
+    if (which === "pq") {
+      lay = layout(bytes.length, pqAvailPx());
+      cellPx = lay.cell;
+      m.cols = lay.cols;
+      m.rows = lay.rows;
+    }
+    else {
+      // Squared off, so 64 bytes reads as a small block beside a full page.
+      m.cols = Math.ceil(Math.sqrt(bytes.length));
+      m.rows = Math.ceil(bytes.length / m.cols);
+    }
+    m.cell = cellPx;
+    if (which === "pq") {
+      m.ctx = sizeCanvasFluid(m.canvas, m.rows, m.cell);
+    }
+    else {
+      m.ctx = sizeCanvasFixed(m.canvas, m.cols, m.rows, m.cell);
+    }
+
+    if (!doAnimate) {
+      paint(m);
+      return;
+    }
+    // The signature arriving as a picture being drawn is what turns "4627
+    // bytes" from a number into a quantity.
+    animate(m, 900, function () {
+      if (which === "pq" && tamperOffset >= 0) { markTamper(); }
+    });
+  }
+
+  // Deliberately does not wipe the pixels. A run takes a couple of seconds,
+  // and blanking the grid for that whole time leaves the biggest panel on the
+  // screen empty for most of every cycle. The previous signature stays up
+  // until the new one starts painting over it, which also makes the point
+  // that each run produces a different one.
+  function resetMosaicState() {
+    tamperOffset = -1;
+    Object.keys(mosaic).forEach(function (k) {
+      mosaic[k].gen = (mosaic[k].gen || 0) + 1;
+    });
+    $("m-note").textContent = "All three grids are drawn at the same " +
+      "scale, and every cell is one byte of a signature this TPM just produced.";
+  }
+
+  function drawBars() {
+    var max = Math.max(pqBytes, c384Bytes, clBytes, 1);
+    $("pq-bar").style.width = (pqBytes / max * 100) + "%";
+    $("c384-bar").style.width = (c384Bytes / max * 100) + "%";
+    $("cl-bar").style.width = (clBytes / max * 100) + "%";
+    if (pqBytes) { $("pq-n").textContent = pqBytes.toLocaleString() + " B"; }
+    if (c384Bytes) { $("c384-n").textContent = c384Bytes.toLocaleString() + " B"; }
+    if (clBytes) { $("cl-n").textContent = clBytes.toLocaleString() + " B"; }
+    drawRatio();
+  }
+
+  // Both halves of the cost, in one sentence, against the algorithm most of
+  // the audience is actually using today. Size alone understates it - the
+  // signing time is the part that changes what a protocol can afford.
+  function drawRatio() {
+    if (!pqBytes || !clBytes) { return; }
+    var txt = "Post-quantum costs <b>" + Math.round(pqBytes / clBytes) +
+      "x the bytes</b>";
+    if (pqSignMs && clSignMs) {
+      txt += " and <b>" + (pqSignMs / clSignMs).toFixed(1) +
+        "x the signing time</b>";
+    }
+    txt += " of ECDSA P-256 &mdash; measured on this chip, on the same digest.";
+    $("ratio").innerHTML = txt;
+  }
+
+  function ms(v) {
+    return Math.round(v).toLocaleString() + " ms";
+  }
+
+  // The signature payload is several thousand characters. Showing it whole
+  // turns the log from evidence into a wall, so it is elided here only - the
+  // mosaic above is drawn from the full bytes.
+  function logLine(ev) {
+    var shown = ev, b64 = ev.b64;
+    if (typeof b64 === "string" && b64.length > 48) {
+      shown = {};
+      Object.keys(ev).forEach(function (k) { shown[k] = ev[k]; });
+      shown.b64 = b64.slice(0, 24) + "\u2026[" + b64.length + " chars]";
+    }
+    log(JSON.stringify(shown));
+  }
+
+  function log(line) {
+    var el = $("log");
+    el.textContent += line + "\n";
+    el.scrollTop = el.scrollHeight;
+  }
+
+  function onEvent(ev) {
+    // The backlog is a whole boot in one event and belongs on the console
+    // tab, not scrolled through the event stream.
+    if (ev.event !== "connected" && ev.event !== "console.backlog") {
+      logLine(ev);
+    }
+
+    switch (ev.event) {
+      case "connected":
+        $("conn-dot").classList.add("on");
+        break;
+
+      case "attract":
+        attractOn = !!ev.on;
+        if (ev.act) { showTab(ev.act === "sign" ? "sign" : ev.act, false); }
+        $("btn-attract").textContent = attractOn ? "Auto: on" : "Auto: off";
+        $("btn-attract").style.borderColor = attractOn ? "var(--accent)" : "";
+        break;
+
+      case "tpm.identity":
+        applyIdentity(ev);
+        break;
+
+      case "console":
+        consoleLine(ev.line);
+        break;
+
+      // Everything the board printed before this browser arrived. The
+      // bootloader output happens once, at boot, so without this the
+      // console tab is empty for every visitor after the first.
+      case "console.backlog":
+        $("console-log").textContent = "";
+        ev.lines.forEach(consoleLine);
+        break;
+
+      case "tpm.reset":
+        $("verdict").className = "verdict";
+        $("verdict-big").textContent = "Resetting TPM\u2026";
+        $("verdict-why").textContent =
+          "Pulsing the reset line on GPIO" + (ev.gpio || "4") + ".";
+        break;
+
+      case "tpm.recovered":
+        $("verdict").className = "verdict";
+        $("verdict-big").textContent =
+          ev.ok ? "TPM ready" : "TPM still not answering";
+        $("verdict-why").textContent = ev.ok
+          ? "The TPM was reset and answered again."
+          : "Check power, seating and chip select.";
+        break;
+
+      case "tls.begin":
+        tlsRun = true;
+        tlsKey = null; tlsCerts = null; tlsHs = null; tlsSign = null;
+        resetTlsFlow();
+        ["1", "2", "3", "4", "5", "6", "7", "8"].forEach(function (n) {
+          tlsStep(n, null, "");
+        });
+        $("tls-fact-key").textContent = "Awaiting public key";
+        $("tls-fact-certs").textContent = "Not generated";
+        $("tls-fact-kem").textContent = ev.group;
+        $("tls-fact-channel").textContent = "Not established";
+        $("tls-verdict").className = "verdict";
+        $("tls-big").textContent = "Running\u2026";
+        $("tls-why").textContent = ev.alg + ", group " + ev.group + ".";
+        break;
+
+      case "tls.step":
+        tlsStep(ev.n, ev.state, ev.detail);
+        setTlsServerStep(ev.n, ev.state);
+        break;
+
+      case "tls.key":
+        tlsKey = ev;
+        tlsFlowDetail("identity", "ML-DSA-87 public key \u00b7 " + ev.pub_bytes +
+                      " B \u00b7 SHA-256 ID " + ev.fingerprint);
+        $("tls-fact-key").textContent = "ML-DSA-87 \u00b7 " + ev.pub_bytes +
+          " B \u00b7 " + ev.fingerprint;
+        break;
+
+      case "tls.certs":
+        tlsCerts = ev;
+        tlsFlowDetail("certificate", "Temporary CA " + ev.ca_bytes +
+                      " B \u2192 TPM leaf " + ev.server_bytes + " B");
+        $("tls-fact-certs").textContent = ev.ca_bytes + " B CA \u2192 " +
+          ev.server_bytes + " B leaf";
+        tlsStep("2", "pass", ev.ca_bytes + " B CA, " +
+                ev.server_bytes + " B leaf");
+        setTlsFlowPhase("certificate", "done");
+        break;
+
+      // The board takes a couple of seconds, most of it shifting a
+      // 4627-byte signature over a 115200 baud console. Say so, or the tab
+      // looks stalled in the middle of the handshake.
+      case "tls.sign":
+        if (ev.state === "running") {
+          tlsStep("4", "pass", "ML-KEM-768 selected");
+          tlsStep("5", "pass", "CA chain and TPM leaf accepted");
+          tlsStep("6", "running", "signing inside the TPM\u2026");
+          ["clienthello", "serverhello", "certchain"].forEach(function (phase) {
+            setTlsFlowPhase(phase, "done");
+          });
+          setTlsFlowPhase("request", "active");
+          setTlsFlowPhase("signature", "active");
+        } else {
+          tlsSign = ev;
+          tlsStep("6", "running", "TPM returned " + ev.bytes +
+                  " B in " + ev.ms + " ms");
+          setTlsFlowPhase("request", "done");
+          setTlsFlowPhase("signature", "done");
+          tlsFlowDetail("signature", ev.bytes +
+                        " B ML-DSA signature \u00b7 " + ev.ms + " ms");
+          setTlsFlowPhase("certverify", "active");
+        }
+        break;
+
+      case "tls.handshake":
+        tlsHs = ev;
+        setTlsFlowPhase("certverify", "done");
+        setTlsFlowPhase("verify", "done");
+        setTlsFlowPhase("finished", "done");
+        setTlsFlowPhase("channel", "done");
+        tlsFlowDetail("channel", ev.cipher + " \u00b7 " + ev.group +
+                      " \u00b7 encrypted channel established");
+        tlsStep("6", "pass", tlsSign ? tlsSign.bytes + " B signature, " +
+                tlsSign.ms + " ms" : "TPM signature accepted");
+        tlsStep("7", "pass", "CertificateVerify and Finished accepted");
+        tlsStep("8", "pass", ev.cipher);
+        $("tls-fact-kem").textContent = ev.group + " \u00b7 shared secret derived";
+        $("tls-fact-channel").textContent = ev.cipher;
+        break;
+
+      case "tls.end":
+        $("tls-verdict").className = "verdict " + (ev.ok ? "pass" : "fail");
+        $("tls-big").textContent = ev.ok
+          ? "Post-quantum TLS established" : "Handshake did not complete";
+        $("tls-why").textContent = ev.ok
+          ? ((tlsHs ? tlsHs.cipher + ", key exchange " + tlsHs.group + ". " : "") +
+             "The server authenticated with an ML-DSA key generated inside the " +
+             "TPM on the board" +
+             (tlsKey ? ", fingerprint " + tlsKey.fingerprint : "") +
+             (tlsSign ? ", which signed the handshake in " + tlsSign.ms + " ms" : "") +
+             ". The key never left the chip.")
+          : "See the event stream.";
+        break;
+
+      case "pcr.begin":
+        pcrRun = true;
+        $("pcr-note").textContent = "Reading\u2026";
+        break;
+
+      case "pcr.table":
+        renderPcrs(ev);
+        break;
+
+      case "spdm.begin":
+        spdmRun = true;
+        // A build with no responder key pinned reads the key and stops. It
+        // passes its one check, which is not a session.
+        spdmDiscovery = ev.mode === "discovery";
+        $("spdm-steps").innerHTML = "";
+        resetSpdmFlow();
+        $("spdm-verdict").className = "verdict";
+        $("spdm-big").textContent = "Running\u2026";
+        $("spdm-why").textContent = ev.on
+          ? "Negotiating a session with the fitted part, over the same bus the other acts use in clear."
+          : "Starting the firmware TPM responder and negotiating a session.";
+        if (ev.on) {
+          $("spdm-silicon").className = "verdict pass";
+          $("spdm-sil-big").textContent = "The fitted part speaks SPDM";
+          $("spdm-sil-why").textContent =
+            "The handshake below runs on the board against the TPM next to it. No host is involved.";
+          $("spdm-heading").textContent = "Secured session with the fitted TPM";
+        }
+        break;
+
+      case "spdm.silicon":
+        // Neutral, not red. This is the documented state of pre-production
+        // firmware, not a fault, and styling it as a failure would both
+        // misrepresent it and read badly on the vendor's own stand.
+        $("spdm-silicon").className = "verdict" +
+          (ev.provisionable ? " pass" : "");
+        $("spdm-sil-big").textContent = ev.provisionable
+          ? "The fitted part supports SPDM"
+          : "The fitted part: negotiation yes, provisioning not yet";
+        $("spdm-sil-why").textContent = ev.message || "";
+        break;
+
+      case "spdm.step":
+        spdmStep(ev);
+        break;
+
+      case "spdm.handshake":
+        spdmDetail(ev.n, ev.chain, "mono");
+        break;
+
+      case "spdm.session":
+        spdmDetail(ev.n, ev.cipher + " \u00b7 session " + ev.id, "secret");
+        spdmFlowDetail(3, ev.cipher + " secured session " + ev.id);
+        break;
+
+      case "spdm.encrypted":
+        spdmDetail(4, ev.mfg + " firmware " + ev.fw + " \u00b7 read as ciphertext",
+          "secret");
+        spdmFlowDetail(4, "Ciphertext response \u00b7 " + ev.mfg + " firmware " + ev.fw,
+          true);
+        break;
+
+      case "spdm.results":
+        $("spdm-verdict").className = "verdict" +
+          (ev.failed !== 0 ? " fail" : spdmDiscovery ? "" : " pass");
+        $("spdm-big").textContent = ev.failed !== 0
+          ? ev.failed + " of " + ev.total + " checks failed"
+          : spdmDiscovery
+            ? "Responder key read \u2014 no session"
+            : "Encrypted channel established";
+        $("spdm-why").textContent = ev.failed !== 0
+          ? "See the event stream."
+          : spdmDiscovery
+            ? ("This build has no responder key pinned, so the act stopped " +
+               "after reading the key out of the part. Nothing was " +
+               "encrypted. Rebuild with SPDM_RSP_PUBKEY set to the key in " +
+               "the event stream to negotiate a session.")
+            : ("All " + ev.total + " checks passed" +
+               (ev.units ? ", including " + ev.units +
+                  " wolfTPM unit tests run inside the encrypted session" : "") +
+               ". Every command inside the session crossed the bus as ciphertext.");
+        break;
+
+      case "seal.begin":
+        sealRun = true;
+        sealMode = ev.mode || sealMode;
+        updateSealModeButtons();
+        resetSealSteps();
+        $("seal-pcr-index").textContent = ev.pcr;
+        $("seal-secret-value").textContent = ev.secret;
+        $("seal-secret-size").textContent = ev.secret.length + " B plaintext";
+        setSealVisualState("seal-secret-node", "done");
+        setSealVisualState("seal-pcr-node", "active");
+        setSealStep("reset", "active", "");
+        break;
+
+      case "seal.reset":
+        sealInitialDigest = ev.digest;
+        $("seal-pcr-value").textContent = shortDigest(ev.digest);
+        setSealVisualState("seal-pcr-node", "done");
+        setSealVisualState("seal-tpm-node", "active");
+        setSealStep("reset", "done", shortDigest(ev.digest), "mono");
+        setSealStep("create", "active", "");
+        break;
+
+      case "seal.policy":
+        $("seal-policy-value").textContent = ev.bytes + " B PCR policy digest";
+        break;
+
+      case "seal.create":
+        $("seal-blob-size").textContent = (ev.pub_bytes + ev.priv_bytes) + " B sealed blob";
+        $("seal-blob-parts").textContent = ev.pub_bytes + " B public + " +
+          ev.priv_bytes + " B encrypted private";
+        setSealVisualState("seal-tpm-node", ev.ok ? "done" : "bad");
+        setSealVisualState("seal-blob-node", ev.ok ? "done" : "bad");
+        setSealStep("create", ev.ok ? "done" : "bad",
+          ev.ok ? (ev.pub_bytes + ev.priv_bytes) + " B blob" : "failed");
+        // Both modes unseal against the matching PCR first. In deny mode
+        // that is the control: without it a refusal afterwards could just
+        // mean sealing never worked, so it runs and is reported rather
+        // than skipped.
+        setSealVisualState("seal-match-path", "active");
+        setSealStep("before", "active", "");
+        break;
+
+      case "seal.unseal":
+        if (ev.stage === "before") {
+          $("seal-match-result").textContent = ev.ok
+            ? "Output: \u201c" + ev.secret + "\u201d" : "Refused";
+          setSealVisualState("seal-match-path", ev.ok ? "done" : "bad");
+          setSealStep("before", ev.ok ? "done" : "bad",
+            ev.ok ? "\u201c" + ev.secret + "\u201d" : "refused",
+            ev.ok ? "secret" : "");
+          if (sealMode === "deny") {
+            setSealStep("extend", "active", "");
+          }
+          else {
+            setSealStep("extend", null, "not run");
+            setSealStep("after", null, "not run");
+            $("seal-change-result").textContent = "Not run";
+          }
+        }
+        else {
+          $("seal-change-result").textContent = ev.ok ? "Released - wrong" : "Access denied";
+          setSealVisualState("seal-change-path", ev.ok ? "bad" : "protected");
+          // Refusing is the correct outcome, so it is marked done. Marking it
+          // red made a passing run read as two failures.
+          setSealStep("after", ev.ok ? "bad" : "done",
+            ev.ok ? "released anyway - WRONG" : (ev.rc_name || "refused"));
+        }
+        break;
+
+      case "seal.extend":
+        $("seal-pcr-value").textContent = shortDigest(ev.digest);
+        $("seal-changed-pcr").textContent = "PCR16new = SHA-256(" +
+          shortDigest(sealInitialDigest) + " || 5A\u20265A) = " +
+          shortDigest(ev.digest);
+        $("seal-changed-pcr").title = "PCR16new = SHA-256(" +
+          sealInitialDigest.toLowerCase() + " || " + "5A".repeat(32) +
+          ") = " + String(ev.digest || "").toLowerCase();
+        setSealVisualState("seal-pcr-node", "changed");
+        setSealVisualState("seal-change-path", "active");
+        // Amber, not red: changing the measurement is something we did on
+        // purpose, not a fault.
+        setSealStep("extend", "active", shortDigest(ev.digest), "mono");
+        break;
+
+      case "seal.end":
+        $("seal-verdict").className = "verdict " + (ev.pass ? "pass" : "fail");
+        sealMode = ev.mode || sealMode;
+        $("seal-big").textContent = ev.pass
+          ? (sealMode === "access" ? "Secret released" : "Secret withheld")
+          : "Unexpected result";
+        $("seal-why").textContent = ev.pass
+          ? (sealMode === "access"
+            ? "PCR 16 remained at the exact value used by the sealing policy, so the TPM released the secret."
+            : "Same sealed blob, same chip, same command. The only thing that changed was the measured state, and that was enough for the TPM to refuse.")
+          : "The sequence did not behave as expected \u2014 see the event stream.";
+        break;
+
+      case "ek.begin":
+        ekRun = true;
+        ekSeen = [];
+        $("ek-rows").innerHTML = "";
+        $("ek-chain").textContent = "";
+        $("ek-summary").textContent = "Reading endorsement certificates\u2026";
+        break;
+
+      case "ek.cert":
+        addEkRow(ev);
+        break;
+
+      case "ek.end":
+        finishEk(ev.count);
+        break;
+
+      case "run.start":
+        running = true;
+        setIdle(false);
+        tampered = !!ev.tamper;
+        if (ev.i2c_khz) {
+          $("sign-bus").textContent = "wolfTPM over I2C \u00b7 " +
+            ev.i2c_khz + " kHz";
+        }
+        resetSignFlow(tampered);
+        if (ev.param_set) {
+          runParamSet = ev.param_set;
+          if ($("param-set")) { $("param-set").value = String(runParamSet); }
+        }
+        setButtons();
+        resetSteps();
+        // The combined demo_acts firmware emits "ready" once at boot and
+        // then starts every act with run.start, so tpm.startup never
+        // arrives on this path and step 1 would stay unset. The standalone
+        // mldsa_onboard image still sends it.
+        if (ev.host === "psoc_c3") {
+          setStep("startup", "done", "");
+          setStep("key", "active", "");
+        }
+        break;
+
+      case "sign.digest.input":
+        const digestHex = String(ev.hex || "").toLowerCase();
+        setSignFlowPhase("digest", "done",
+          (ev.message ? "\u201c" + ev.message + "\u201d\n" : "") +
+          "SHA-256 " + digestHex.slice(0, 16) + "\u2026");
+        document.querySelector('#sign-flow [data-phase="digest"] .spdm-message span').title =
+          ev.alg + " " + digestHex;
+        setSignFlowPhase("key", "active");
+        break;
+
+      case "tpm.startup":
+        setStep("startup", "done", "");
+        setStep("key", "active", "");
+        break;
+
+      case "key.create":
+        setStep("key", "done", Math.round(ev.ms) + " ms");
+        setStep("sign", "active", "");
+        setSignFlowPhase("key", "done",
+          "ML-DSA key pair \u00b7 " + ev.pub_bytes.toLocaleString() + " byte public key");
+        setSignFlowPhase("request", "active");
+        $("c-pq-kg").textContent = ms(ev.ms);
+        break;
+
+      case "sign.digest":
+        pqBytes = ev.sig_bytes;
+        pqSignMs = ev.ms;
+        const signTiming = Math.round(ev.ms) + " ms" +
+          (ev.samples ? " median of " + ev.samples : "");
+        const signBreakdown = ev.tpm_sign_ms == null ? signTiming :
+          Math.round(ev.tpm_sign_ms) + " ms TPM + " +
+          Math.round(ev.transfer_ms) + " ms I2C = " + signTiming;
+        setStep("sign", "done", ev.sig_bytes.toLocaleString() + " B \u00b7 " +
+          signBreakdown);
+        setStep("verify", "active", "");
+        setSignFlowPhase("request", "done");
+        setSignFlowPhase("signature", "done",
+          ev.sig_bytes.toLocaleString() + " byte ML-DSA-" +
+          (ev.param_set || runParamSet) + " signature \u00b7 " + signTiming);
+        if (tampered) { setSignFlowPhase("tamper", "active"); }
+        else { setSignFlowPhase("verify", "active"); }
+        $("c-pq-set").textContent = ev.param_set || runParamSet;
+        $("pq-label").textContent = "ML-DSA-" + runParamSet + " signature";
+        $("c-pq-sz").textContent = ev.sig_bytes.toLocaleString() + " B";
+        $("c-pq-tpm").textContent = ev.tpm_sign_ms == null ? "\u2014" : ms(ev.tpm_sign_ms);
+        $("c-pq-xfer").textContent = ev.transfer_ms == null ? "\u2014" : ms(ev.transfer_ms);
+        $("c-pq-sg").textContent = ms(ev.ms) +
+          (ev.samples ? " median (" + ev.samples + ")" : "");
+        drawBars();
+        break;
+
+      case "sign.bytes":
+        $("m-pq-title").textContent = "ML-DSA-" + runParamSet;
+        $("m-pq-n").textContent = ev.bytes.toLocaleString() + " cells";
+        showMosaic("pq", b64ToBytes(ev.b64), true);
+        break;
+
+      case "compare.bytes":
+        if (ev.alg === "ECDSA_P384") {
+          $("m-384-n").textContent = ev.bytes.toLocaleString() + " cells";
+          showMosaic("c384", b64ToBytes(ev.b64), false);
+        }
+        else {
+          $("m-cl-n").textContent = ev.bytes.toLocaleString() + " cells";
+          showMosaic("cl", b64ToBytes(ev.b64), false);
+        }
+        break;
+
+      case "tamper":
+        setStep("tamper", "bad", "offset " + ev.offset);
+        setSignFlowPhase("tamper", "bad", "One bit flipped at byte " + ev.offset);
+        setSignFlowPhase("verify", "active");
+        // The signature was emitted before the flip, so the mosaic shows the
+        // genuine bytes and this marks the one cell that changed.
+        tamperOffset = ev.offset;
+        if (mosaic.pq.data) {
+          if (mosaic.pq.painted >= mosaic.pq.data.length) { markTamper(); }
+          $("m-note").innerHTML = "One bit was flipped in <b>one</b> of these " +
+            mosaic.pq.data.length.toLocaleString() + " bytes. That is 1 bit in " +
+            (mosaic.pq.data.length * 8).toLocaleString() +
+            ", and it is enough to invalidate the whole signature.";
+        }
+        break;
+
+      case "verify.host":
+        var ok = ev.result === "valid";
+        setStep("verify", ok ? "done" : "bad", ev.ms.toFixed(2) + " ms");
+        setSignFlowPhase("verify", (ok || tampered) ? "done" : "bad",
+          "wolfCrypt: " + ev.result + " \u00b7 " + ev.ms.toFixed(2) + " ms");
+        $("verify-note").textContent = ok
+          ? "Verified in software by wolfCrypt from the public key alone \u2014 the private key never left the TPM."
+          : "wolfCrypt rejected the signature.";
+        break;
+
+      case "compare.classical":
+        if (ev.alg === "ECDSA_P384") {
+          c384Bytes = ev.sig_bytes;
+          $("c-384-sz").textContent = ev.sig_bytes.toLocaleString() + " B";
+          $("c-384-kg").textContent = ms(ev.keygen_ms);
+          $("c-384-tpm").textContent = ms(ev.tpm_sign_ms);
+          $("c-384-xfer").textContent = ms(ev.transfer_ms);
+          $("c-384-sg").textContent = ms(ev.sign_ms);
+        }
+        else {
+          clBytes = ev.sig_bytes;
+          clSignMs = ev.sign_ms;
+          $("c-256-sz").textContent = ev.sig_bytes.toLocaleString() + " B";
+          $("c-256-kg").textContent = ms(ev.keygen_ms);
+          $("c-256-tpm").textContent = ms(ev.tpm_sign_ms);
+          $("c-256-xfer").textContent = ms(ev.transfer_ms);
+          $("c-256-sg").textContent = ms(ev.sign_ms);
+        }
+        drawBars();
+        break;
+
+      case "result":
+        var v = $("verdict");
+        if (ev.pass && !tampered) {
+          v.className = "verdict pass";
+          $("verdict-big").textContent = "Signature valid";
+          $("verdict-why").textContent =
+            "The TPM produced a post-quantum ML-DSA signature and wolfCrypt verified it independently.";
+        } else if (ev.pass && tampered) {
+          v.className = "verdict pass";
+          $("verdict-big").textContent = "Tampering detected";
+          $("verdict-why").textContent =
+            "One bit was flipped in the signature and wolfCrypt rejected it, exactly as it must.";
+        } else {
+          v.className = "verdict fail";
+          $("verdict-big").textContent = "Unexpected result";
+          $("verdict-why").textContent = "Verification did not match expectation \u2014 see the event stream.";
+        }
+        break;
+
+      case "run.end":
+        running = false;
+        setIdle(true);
+        setButtons();
+        break;
+
+      case "error":
+        running = false;
+        setButtons();
+        $("verdict").className = "verdict fail";
+        $("verdict-big").textContent = "Error";
+        $("verdict-why").textContent = ev.message || "";
+        break;
+    }
+  }
+
+  // ---- Tabs ----------------------------------------------------------
+  // Panels used to stack, so pressing a button filled something below the
+  // fold and nothing appeared to happen. Each act now owns a tab, and the
+  // attract loop switches tabs as it goes.
+  var VIEWS = { sign: "view-sign", seal: "view-seal", ek: "view-ek",
+                pcr: "view-pcr", spdm: "view-spdm",
+                tls: "view-tls", console: "view-console" };
+  var sealRun = false, ekRun = false, spdmRun = false, pcrRun = false,
+      tlsRun = false, spdmDiscovery = false;
+
+  function showTab(name, autoRun) {
+    var k;
+    if (!VIEWS[name]) { return; }
+    for (k in VIEWS) {
+      if (VIEWS.hasOwnProperty(k)) { $(VIEWS[k]).hidden = (k !== name); }
+    }
+    Array.prototype.forEach.call(
+      document.querySelectorAll(".tab[data-tab]"), function (b) {
+        b.classList.toggle("active", b.getAttribute("data-tab") === name);
+      });
+    // Opening an empty tab and seeing nothing is the same dead end as before,
+    // so fill it on first view. Only on a real click - the attract loop runs
+    // the act itself and must not be double-fired.
+    if (autoRun && name === "seal" && !sealRun) { startSeal(); }
+    if (autoRun && name === "ek" && !ekRun) { startEk(); }
+    if (autoRun && name === "spdm" && !spdmRun) { startSpdm(); }
+    if (autoRun && name === "pcr" && !pcrRun) { startPcr("read"); }
+    if (autoRun && name === "tls" && !tlsRun) { startTls(); }
+  }
+
+  function startSeal() {
+    sealRun = true;
+    fetch("/api/seal", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: sealMode })
+    })
+      .catch(function (e) { log("seal request failed: " + e); });
+  }
+
+  function startTls() {
+    tlsRun = true;
+    fetch("/api/tls", { method: "POST" })
+      .catch(function (e) { log("tls request failed: " + e); });
+  }
+
+  function startPcr(action) {
+    pcrRun = true;
+    fetch("/api/pcr", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: action })
+    }).catch(function (e) { log("pcr request failed: " + e); });
+  }
+
+  function startSpdm() {
+    spdmRun = true;
+    fetch("/api/spdm", { method: "POST" })
+      .catch(function (e) { log("spdm request failed: " + e); });
+  }
+
+  function startEk() {
+    ekRun = true;
+    fetch("/api/ekcerts", { method: "POST" })
+      .catch(function (e) { log("ek request failed: " + e); });
+  }
+
+  // ---- Post-quantum TLS -------------------------------------------------
+  var tlsKey = null, tlsCerts = null, tlsHs = null, tlsSign = null;
+
+  function tlsStep(n, state, detail) {
+    var li = document.querySelector('#tls-steps li[data-n="' + n + '"]');
+    var d;
+    if (!li) { return; }
+    li.classList.remove("active", "done", "bad");
+    if (state === "running") { li.classList.add("active"); }
+    else if (state === "pass") { li.classList.add("done"); }
+    else if (state === "fail") { li.classList.add("bad"); }
+    d = li.querySelector(".detail");
+    d.textContent = detail === undefined ? "" : detail;
+  }
+
+  function resetTlsFlow() {
+    document.querySelectorAll("#tls-flow .tls-lane").forEach(function (lane) {
+      lane.classList.remove("active", "done", "bad");
+      var text = lane.querySelector(".tls-message span");
+      if (text && text.dataset.default) { text.textContent = text.dataset.default; }
+    });
+  }
+
+  function setTlsServerStep(n, state) {
+    var phase = { 1: "identity", 2: "certificate", 3: "server" }[n];
+    var flowState = state === "running" ? "active" :
+      (state === "pass" ? "done" : (state === "fail" ? "bad" : null));
+    if (phase) { setTlsFlowPhase(phase, flowState); }
+    if (n === 4 && state === "running") {
+      setTlsFlowPhase("clienthello", "active");
+    }
+    if (state === "fail") {
+      document.querySelectorAll("#tls-flow .tls-lane.active").forEach(function (lane) {
+        lane.classList.remove("active");
+        lane.classList.add("bad");
+      });
+    }
+  }
+
+  function setTlsFlowPhase(phase, state) {
+    var lane = document.querySelector('#tls-flow .tls-lane[data-phase="' + phase + '"]');
+    if (!lane) { return; }
+    lane.classList.remove("active", "done", "bad");
+    if (state) { lane.classList.add(state); }
+  }
+
+  function tlsFlowDetail(phase, text) {
+    var lane = document.querySelector('#tls-flow .tls-lane[data-phase="' + phase + '"]');
+    if (lane) { lane.querySelector(".tls-message span").textContent = text; }
+  }
+
+  // ---- Sign & verify flow ---------------------------------------------
+  function resetSignFlow(isTampered) {
+    $("sign-flow").classList.toggle("tampered", isTampered);
+    document.querySelectorAll("#sign-flow .spdm-lane").forEach(function (lane) {
+      lane.classList.remove("active", "done", "bad");
+    });
+    setSignFlowText("digest", "Prepare SHA-256 digest");
+    setSignFlowText("key", "Create ML-DSA key pair");
+    setSignFlowText("request", "Sign digest with TPM-held key");
+    setSignFlowText("signature", "Return public key and ML-DSA signature");
+    setSignFlowText("tamper", "Flip one signature bit for the negative test");
+    setSignFlowText("verify", "Verify signature with wolfCrypt");
+    setSignFlowPhase("digest", "active");
+  }
+
+  function setSignFlowText(phase, text) {
+    var lane = document.querySelector('#sign-flow .spdm-lane[data-phase="' + phase + '"]');
+    if (lane) { lane.querySelector(".spdm-message span").textContent = text; }
+  }
+
+  function setSignFlowPhase(phase, state, text) {
+    var lane = document.querySelector('#sign-flow .spdm-lane[data-phase="' + phase + '"]');
+    if (!lane) { return; }
+    lane.classList.remove("active", "done", "bad");
+    if (state) { lane.classList.add(state); }
+    if (text !== undefined) { setSignFlowText(phase, text); }
+  }
+
+  // ---- Measured boot ---------------------------------------------------
+  function renderPcrs(ev) {
+    var grid = $("pcr-grid"), set = 0, drtm = 0, i, p, cell, idx, dig;
+    grid.innerHTML = "";
+    for (i = 0; i < ev.pcrs.length; i++) {
+      p = ev.pcrs[i];
+      cell = document.createElement("div");
+      cell.className = "pcrcell";
+      // Three distinct states, and conflating them misleads. All zero means
+      // never extended. All ff is a DRTM register (17-22), which the TPM
+      // initialises to ones and which only locality 4 can reset - it is not
+      // a measurement. Anything else genuinely holds one.
+      if (/^f+$/i.test(p.digest || "")) {
+        cell.classList.add("drtm");
+        drtm++;
+      }
+      else if (/[^0]/.test(p.digest || "")) {
+        cell.classList.add("set");
+        set++;
+      }
+      if (p.index === ev.touched) { cell.classList.add("hit"); }
+      idx = document.createElement("span");
+      idx.className = "i";
+      idx.textContent = "PCR " + p.index;
+      dig = document.createElement("span");
+      dig.className = "d";
+      dig.textContent = p.digest
+        ? p.digest.slice(0, 24).toLowerCase() + "\u2026" : "unreadable";
+      cell.appendChild(idx);
+      cell.appendChild(dig);
+      grid.appendChild(cell);
+    }
+
+    $("pcr-banks").innerHTML = (ev.banks || []).length
+      ? "Banks on this part: " + ev.banks.map(function (b) {
+          return "<b>" + b.name + "</b> " +
+            (b.allocated ? "allocated" : "present but not allocated");
+        }).join(", ") + ". A TPM can only have a limited number allocated at " +
+        "once, and switching needs TPM2_PCR_Allocate and a reset."
+      : "";
+
+    $("pcr-note").innerHTML =
+      (set ? "<b>" + set + "</b> of " + ev.pcrs.length +
+             " registers hold a measurement. "
+           : "No register holds a measurement yet. ") +
+      (drtm ? "<b>" + drtm + "</b> read as all ones: those are the " +
+              "dynamic root-of-trust registers, which the TPM initialises to " +
+              "ones and only locality 4 can reset, so they are unavailable " +
+              "here rather than measured. "
+            : "") +
+      "The rest read as all zero, meaning they have never been extended.";
+  }
+
+  // ---- SPDM ------------------------------------------------------------
+  function spdmStep(ev) {
+    var li = document.querySelector('#spdm-steps li[data-n="' + ev.n + '"]');
+    var mark, body, det;
+    if (!li) {
+      li = document.createElement("li");
+      li.setAttribute("data-n", ev.n);
+      mark = document.createElement("span");
+      mark.className = "mark";
+      mark.textContent = ev.n;
+      body = document.createElement("span");
+      body.className = "label";
+      det = document.createElement("span");
+      det.className = "detail";
+      li.appendChild(mark);
+      li.appendChild(body);
+      li.appendChild(det);
+      $("spdm-steps").appendChild(li);
+    }
+    // The board names a step in "detail" and the host path in "title", and
+    // the text that arrives with "pass" reads better than the one that came
+    // with "running", so a later name replaces an earlier one.
+    body = li.querySelector(".label");
+    if (body && (ev.title || ev.detail)) {
+      body.textContent = ev.title || ev.detail;
+    }
+    li.classList.remove("active", "done", "bad");
+    if (ev.state === "running") { li.classList.add("active"); }
+    else if (ev.state === "pass") { li.classList.add("done"); }
+    else if (ev.state === "fail") { li.classList.add("bad"); }
+    setSpdmFlowState(ev.n, ev.state);
+  }
+
+  function spdmDetail(n, text, cls) {
+    var li = document.querySelector('#spdm-steps li[data-n="' + n + '"]');
+    var d;
+    if (!li) { return; }
+    d = li.querySelector(".detail");
+    d.className = "detail" + (cls ? " " + cls : "");
+    d.textContent = text;
+  }
+
+  function resetSpdmFlow() {
+    document.querySelectorAll("#spdm-flow .spdm-lane").forEach(function (lane) {
+      lane.classList.remove("active", "done", "bad");
+    });
+    spdmFlowDetail(3, "Key exchange \u00b7 secured session");
+    spdmFlowDetail(4, "Ciphertext response \u00b7 manufacturer and firmware", true);
+  }
+
+  function setSpdmFlowState(n, state) {
+    document.querySelectorAll('#spdm-flow .spdm-lane[data-n="' + n + '"]').forEach(
+      function (lane) {
+        lane.classList.remove("active", "done", "bad");
+        if (state === "running") { lane.classList.add("active"); }
+        else if (state === "pass") { lane.classList.add("done"); }
+        else if (state === "fail") { lane.classList.add("bad"); }
+      });
+  }
+
+  function spdmFlowDetail(n, text, reverse) {
+    var selector = '#spdm-flow .spdm-lane[data-n="' + n + '"]';
+    if (reverse) { selector += ".reverse"; }
+    var lane = document.querySelector(selector);
+    if (lane) { lane.querySelector(".spdm-message span").textContent = text; }
+  }
+
+  // ---- Sealed secret -------------------------------------------------
+  var sealInitialDigest = "";
+  var sealMode = "access";
+
+  function updateSealModeButtons() {
+    document.querySelectorAll("#seal-mode button").forEach(function (button) {
+      button.classList.toggle("selected", button.getAttribute("data-mode") === sealMode);
+    });
+  }
+
+  function setSealVisualState(id, state) {
+    var node = $(id);
+    if (!node) { return; }
+    node.classList.remove("active", "done", "bad", "changed", "protected");
+    if (state) { node.classList.add(state); }
+  }
+
+  function setSealStep(key, state, detail, cls) {
+    var li = document.querySelector('#seal-steps li[data-k="' + key + '"]');
+    var d;
+    if (!li) { return; }
+    li.classList.remove("active", "done", "bad");
+    if (state) { li.classList.add(state); }
+    d = li.querySelector(".detail");
+    d.className = "detail" + (cls ? " " + cls : "");
+    d.textContent = detail === undefined ? "" : detail;
+  }
+
+  function shortDigest(hex) {
+    if (!hex) { return ""; }
+    return hex.slice(0, 16).toLowerCase() + "\u2026";
+  }
+
+  function resetSealSteps() {
+    ["reset", "create", "before", "extend", "after"].forEach(function (k) {
+      setSealStep(k, null, "");
+    });
+    $("seal-verdict").className = "verdict";
+    $("seal-big").textContent = "Running\u2026";
+    $("seal-why").textContent = "Talking to the TPM.";
+    sealInitialDigest = "";
+    ["seal-secret-node", "seal-pcr-node", "seal-tpm-node", "seal-blob-node",
+     "seal-match-path", "seal-change-path"].forEach(function (id) {
+      setSealVisualState(id, null);
+    });
+    $("seal-pcr-value").textContent = "Waiting for measurement";
+    $("seal-policy-value").textContent = "Bind secret to the PCR value";
+    $("seal-blob-size").textContent = "Sealed blob";
+    $("seal-blob-parts").textContent = "Public policy + encrypted private data";
+    $("seal-match-result").textContent = "Pending";
+    $("seal-change-result").textContent = "Pending";
+    $("seal-changed-pcr").textContent = "PCR extend changes the platform state";
+  }
+
+  // ---- Endorsement certificates -------------------------------------
+  // The TCG subject-alt-name fields are the point of this panel: the
+  // manufacturer, model and firmware version are asserted by the issuing CA,
+  // not by the chip describing itself. tpmManufacturer is hex ASCII.
+  function decodeMfg(v) {
+    var hex = String(v || "").replace(/^id:/, ""), out = "", i, c;
+    if (!/^[0-9a-fA-F]+$/.test(hex) || hex.length % 2) { return v; }
+    for (i = 0; i < hex.length; i += 2) {
+      c = parseInt(hex.substr(i, 2), 16);
+      if (c >= 0x20 && c < 0x7f) { out += String.fromCharCode(c); }
+    }
+    return out ? out + " (" + v + ")" : v;
+  }
+
+  // Certificate fields are whatever the issuer put in them, and the EK
+  // summary is the one place they reach innerHTML rather than textContent.
+  function esc(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  function ekKeyText(ev) {
+    if (ev.alg === "RSA") { return "RSA-" + (ev.bits || "?"); }
+    return "ECC " + (ev.curve || "?");
+  }
+
+  function addEkRow(ev) {
+    var tr = document.createElement("tr");
+    function cell(text, cls) {
+      var td = document.createElement("td");
+      td.textContent = text;
+      if (cls) { td.className = cls; }
+      tr.appendChild(td);
+    }
+    cell(ev.handle);
+    cell(ekKeyText(ev));
+    cell(ev.hash || "\u2014");
+    cell((ev.cert_bytes || 0).toLocaleString() + " B");
+    cell(ev.serial || "\u2014");
+    // Absent means not checked, which is not the same as checked and failed.
+    cell(ev.key_match === undefined ? "\u2014" : (ev.key_match ? "yes" : "NO"),
+         ev.key_match ? "ok" : "");
+    cell(ev.issuer_cn || "\u2014", "issuer");
+    $("ek-rows").appendChild(tr);
+    ekSeen.push(ev);
+  }
+
+  function finishEk(count) {
+    var first = ekSeen[0] || {}, san = first.san || {};
+    var untrusted = ekSeen.filter(function (e) {
+      return e.chain !== "trusted";
+    }).length;
+
+    // The board reports the certificates it finds without decoding them, so
+    // there is no manufacturer or model to quote. Say what is actually known
+    // rather than printing an empty field.
+    var decoded = !!san.manufacturer;
+    $("ek-summary").innerHTML = !count
+      ? "No endorsement certificates found."
+      : decoded
+        ? "<b>" + count + " certificates</b> read from the TPM's own NV storage. " +
+          "Each one was written at manufacture and states, signed by the issuer, " +
+          "that this is a <b>" + esc(san.model || "TPM") + "</b> from <b>" +
+          esc(decodeMfg(san.manufacturer)) + "</b>, firmware " +
+          esc(san.version || "unknown") + "."
+        : "<b>" + count + " certificates</b> read from the TPM's own NV storage, " +
+          "each written there at manufacture and signed by the issuer.";
+
+    var matched = ekSeen.length && ekSeen.every(function (e) {
+      return e.key_match;
+    });
+    $("ek-chain").innerHTML = !decoded
+      ? ""
+      : untrusted
+      ? "Every certificate parsed" + (matched
+          ? ", and in every case the public key in the certificate matches " +
+            "the key the TPM derived just now &mdash; the chip is provably " +
+            "the one the certificate was issued to"
+          : "") +
+        ". The chain is reported as untrusted because these are issued by " +
+        "Infineon's <b>test</b> CA, which is expected for a pre-production " +
+        "sample and is deliberately absent from the production trust store."
+      : "Chains verified against the bundled production roots.";
+  }
+
+  function setIdle(idle) {
+    $("claim").classList.toggle("idle", !!idle);
+  }
+
+  function setButtons() {
+    $("btn-run").disabled = running;
+    $("btn-tamper").disabled = running;
+    $("btn-reset").disabled = running;
+    var sel = $("param-set");
+    if (sel) sel.disabled = running;
+  }
+
+  function run(tamper) {
+    if (running) return;
+    fetch("/api/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        param_set: currentParamSet(),
+        tamper: tamper,
+        compare: true
+      })
+    }).catch(function (e) { log("request failed: " + e); });
+  }
+
+  function currentParamSet() {
+    var sel = $("param-set");
+    return sel ? parseInt(sel.value, 10) : paramSets[0];
+  }
+
+  function updatePqLabel() {
+    $("pq-label").textContent = "ML-DSA-" + currentParamSet() + " signature";
+  }
+
+  // The parameter control is built from what the fitted part can actually be
+  // asked for, never hardcoded. The server owns that list and enforces it in
+  // api_run as well, because a browser tab left open from a session with a
+  // different part fitted could otherwise still POST a set this one cannot do.
+  function applyIdentity(ident) {
+    if (ident.label) $("tpm-id").textContent = ident.label;
+    paramSets = (ident.param_sets && ident.param_sets.length)
+      ? ident.param_sets : [87];
+
+    var wrap = $("param-wrap");
+    if (paramSets.length === 1) {
+      // One option is not a choice - render it as a label so there is
+      // nothing to mis-click.
+      wrap.innerHTML = '<span class="chip">ML-DSA-' + paramSets[0] + '</span>';
+    } else {
+      var html = '<select id="param-set">';
+      paramSets.forEach(function (n, i) {
+        html += '<option value="' + n + '"' + (i === 0 ? ' selected' : '') +
+          '>ML-DSA-' + n + '</option>';
+      });
+      wrap.innerHTML = html + '</select>';
+      $("param-set").addEventListener("change", updatePqLabel);
+    }
+    updatePqLabel();
+    setButtons();
+  }
+
+  function consoleLine(text) {
+    var el = $("console-log");
+    if (!el) { return; }
+    // The debug probe resets the part more than once per reset request, so
+    // the banner can appear several times. Start again on the last one, and
+    // drop the fragment the reset cut in half.
+    var at = text.lastIndexOf("wolfBoot HAL Init");
+    if (at >= 0) {
+      el.textContent = "";
+      text = text.slice(at);
+    }
+    el.textContent += text + "\n";
+    // A booth runs for hours; keep the tail rather than the whole day.
+    if (el.textContent.length > 20000) {
+      el.textContent = el.textContent.slice(-16000);
+    }
+    el.scrollTop = el.scrollHeight;
+  }
+
+  $("btn-reset-board").addEventListener("click", function () {
+    if (running) { return; }
+    $("console-log").textContent += "\n--- resetting ---\n";
+    fetch("/api/reset", { method: "POST" })
+      .catch(function (e) { consoleLine("reset request failed: " + e); });
+  });
+
+  $("btn-reset").addEventListener("click", function () {
+    if (running) return;
+    fetch("/api/reset", { method: "POST" })
+      .catch(function (e) { log("reset request failed: " + e); });
+  });
+
+  $("btn-attract").addEventListener("click", function () {
+    fetch("/api/attract", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ on: !attractOn })
+    }).catch(function (e) { log("attract request failed: " + e); });
+  });
+
+  $("btn-seal").addEventListener("click", startSeal);
+  document.querySelectorAll("#seal-mode button").forEach(function (button) {
+    button.addEventListener("click", function () {
+      sealMode = button.getAttribute("data-mode");
+      updateSealModeButtons();
+    });
+  });
+
+  $("btn-ek").addEventListener("click", startEk);
+  $("btn-spdm").addEventListener("click", startSpdm);
+  $("btn-tls").addEventListener("click", startTls);
+  $("btn-pcr").addEventListener("click", function () { startPcr("read"); });
+  $("btn-pcr-extend").addEventListener("click", function () { startPcr("extend"); });
+  $("btn-pcr-reset").addEventListener("click", function () { startPcr("reset"); });
+
+  Array.prototype.forEach.call(
+    document.querySelectorAll(".tab[data-tab]"), function (b) {
+      b.addEventListener("click", function () {
+        showTab(b.getAttribute("data-tab"), true);
+        // Choosing a tab counts as interaction, or the loop advances and
+        // switches away from what the visitor just picked.
+        fetch("/api/touch", { method: "POST" }).catch(function () {});
+      });
+    });
+
+  $("btn-run").addEventListener("click", function () { run(false); });
+  $("btn-tamper").addEventListener("click", function () { run(true); });
+
+  // Reconnecting event source: a booth screen must survive a server restart
+  // without anyone touching a keyboard.
+  function connect() {
+    var es = new EventSource("/api/stream");
+    es.onmessage = function (m) {
+      try { onEvent(JSON.parse(m.data)); } catch (e) { /* ignore */ }
+    };
+    es.onerror = function () {
+      $("conn-dot").classList.remove("on");
+      es.close();
+      setTimeout(connect, 2000);
+    };
+  }
+  fetch("/api/tpm").then(function (r) { return r.json(); })
+    .then(applyIdentity)
+    .catch(function () { /* the event stream will deliver it */ });
+  connect();
+  drawBars();
+})();
+</script>
+</body>
+</html>

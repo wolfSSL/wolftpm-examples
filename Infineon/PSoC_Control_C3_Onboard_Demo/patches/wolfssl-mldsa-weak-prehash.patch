@@ -1,0 +1,20 @@
+diff --git a/wolfcrypt/src/wc_mldsa.c b/wolfcrypt/src/wc_mldsa.c
+index eb16b5600e..33c8f501a7 100644
+--- a/wolfcrypt/src/wc_mldsa.c
++++ b/wolfcrypt/src/wc_mldsa.c
+@@ -888,7 +888,15 @@ static int mldsa_check_hash_strength(int hashAlg, word16 lambda)
+             return BAD_FUNC_ARG;
+     }
+ 
++#ifdef WOLFSSL_MLDSA_ALLOW_WEAK_PREHASH
++    /* Opt-in for TPM firmware that pre-hashes with SHA-256 only, which sets
++     * 65 and 87 cannot satisfy. Not FIPS 204 section 5.4 compliant. */
++    (void)lambda;
++    (void)strength;
++    return 0;
++#else
+     return (strength >= lambda) ? 0 : BAD_FUNC_ARG;
++#endif
+ }
+ 
+ /* Get the OID for the digest hash.

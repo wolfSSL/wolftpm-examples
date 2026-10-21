@@ -1,0 +1,7 @@
+// Pin reset. Reset type 2 drives the board's XRES, which the TPM's reset
+// line is tied to, so this resets both. A plain 'r' is a core reset and
+// leaves the TPM running.
+RSetType 2
+r
+go
+q
