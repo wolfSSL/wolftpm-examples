@@ -1277,7 +1277,14 @@ def tls_env():
     libs = [p for p in (os.environ.get("WOLFSSL_PQTLS_LIB_DIR"),
                         os.environ.get("LIB_PATH")) if p]
     if libs:
-        key = "PATH" if sys.platform == "win32" else "LD_LIBRARY_PATH"
+        # Each loader reads its own variable, and naming the wrong one is a
+        # silent miss rather than an error.
+        if sys.platform == "win32":
+            key = "PATH"
+        elif sys.platform == "darwin":
+            key = "DYLD_LIBRARY_PATH"
+        else:
+            key = "LD_LIBRARY_PATH"
         env[key] = os.pathsep.join(libs + [env.get(key, "")])
     return env
 

@@ -64,6 +64,22 @@ interoperable with an unpatched peer, and production firmware supporting pure
 ML-DSA is expected to remove the need for it. Both ends of this handshake are
 `board_tls`, so nothing else has to carry the patch.
 
+### Building it
+
+`../build-tls.sh` runs the whole of the rest of this section: it fetches and pins wolfSSL if there is not one beside the checkout already, applies the patch, installs the library into `wolfssl-pqtls`, and builds `board_tls`. It needs no cross compiler, no wolfBoot and no board, so it runs on a machine that only drives the demo. Re-running it is cheap, because it skips a patched wolfSSL that is already installed; pass `-f` to rebuild that too.
+
+It needs a compiler, git, make and the GNU autotools:
+
+```
+macOS    xcode-select --install && brew install autoconf automake libtool
+Debian   sudo apt install build-essential autoconf automake libtool git
+MSYS2    pacman -S --needed autotools libtool mingw-w64-x86_64-gcc git
+```
+
+On Windows run it from the MSYS2 MINGW64 shell. Everything below is what it
+does, for anyone who would rather run the steps by hand or needs to change
+one of them.
+
 One wolfSSL, with the patch applied. **There is no second clone to make**: if
 you built the firmware with `build.sh` or `build.bat`, a wolfSSL is already
 sitting beside the other trees, pinned to the revision the firmware was built
@@ -95,9 +111,11 @@ git apply $DEMO/patches/wolfssl-hash-mldsa-tls.patch
             --enable-certgen --enable-certreq --enable-certext \
             --enable-static --disable-shared \
             --disable-sys-ca-certs --enable-harden \
-            CFLAGS="-DWOLFSSL_HASH_MLDSA_TLS"
+            CFLAGS="-DWOLFSSL_HASH_MLDSA_TLS -DWOLFSSL_MLDSA_ALLOW_WEAK_PREHASH"
 make && make install
 ```
+
+The pinned revision needs only that one patch. A newer wolfSSL enforces FIPS 204 section 5.4, which requires a pre-hash to carry the collision strength of the parameter set, and the part signs SHA-256 only - so on a tree that has `mldsa_check_hash_strength` in `wolfcrypt/src/wc_mldsa.c`, apply `patches/wolfssl-mldsa-weak-prehash.patch` as well. The second define above is what it reads; it does nothing at the pin. BUILD.md section 1 has the longer version of this.
 
 `autogen.sh` needs autoconf, automake and libtool. Under MSYS2 those come
 from `pacman -S --needed autotools libtool`; `autoconf` and `automake` are
@@ -133,6 +151,12 @@ link fails with a wall of `undefined reference to __imp__errno`,
 rather than as the wrong compiler. Whichever of the two built wolfSSL
 above has to build this as well.
 
+On macOS `autogen.sh` needs the GNU autotools, which Homebrew supplies. It
+installs GNU libtool as `glibtoolize`, because macOS already has an unrelated
+tool of that name; if `autoreconf` reports `libtoolize` missing, run it as
+`LIBTOOLIZE=glibtoolize ./autogen.sh`. Nothing else differs - the static link
+leaves no library-path question at run time, unlike Windows below.
+
 Under MSYS2 that link is static, so `board_tls.exe` can be copied to the
 machine the demo actually runs on without MSYS2 being installed there. Build
 it dynamically and it needs `libwinpthread-1.dll` on `PATH`, which on a booth
@@ -149,6 +173,38 @@ Or set `WOLFSSL_PQTLS_LIB_DIR` to the `bin` directory before starting the server
 `build.sh` and `build.bat` in the parent directory build the firmware, not
 this; it is a separate step because it needs the patched wolfSSL. There is no
 TPM on this machine and nothing here needs wolfTPM.
+
+### Checking the build with no board attached
+
+The two endpoints can be run by hand, and they get as far as the one
+operation only the TPM can do. The public key here is random, which is
+enough: the handshake fails before anything verifies it.
+
+```
+cd host/tls
+./board_tls -gencert -pub=$(head -c 2592 /dev/urandom | od -An -tx1 | tr -d ' \n')
+./board_tls -server -p=11598 < /dev/null &
+./board_tls -client -p=11598
+```
+
+A good build writes the two certificates, then the server prints `SIGNREQ`
+and 64 hex characters - the SHA-256 digest it wants signed - followed by
+`no answer to SIGNREQ` and `accept failed -248`, and the client reports
+`connect failed -308: error state on socket`. Those failures are the
+expected result with nothing on the other end of the delegation. Reaching
+them proves the library has ML-DSA-87 certificate generation, that the
+ML-KEM group and the patch's code point both negotiated, and that the
+handshake ran as far as asking for the signature. Delete `host/tls/certs`
+afterwards; the tab issues its own.
+
+A client that reports `UseKeyShare failed` instead was built against a
+wolfSSL without `--enable-tls-mlkem-standalone`. To check that the library
+is the patched one rather than a stock install that happens to be on the
+same path, look for the define it was built with:
+
+```
+grep WOLFSSL_HASH_MLDSA_TLS ../../../../../wolfssl-pqtls/include/wolfssl/options.h
+```
 
 A handshake takes a few seconds, nearly all of it moving the 4627-byte
 signature over the board's 115200 baud console rather than in the TPM. The
@@ -198,13 +254,18 @@ work.
 | `sse_probe.py` | Runs one act and prints the events, for testing without a browser. |
 | `shot.py`, `capture-tabs.sh` | Screenshot the tabs, for sharing. |
 
-## On Linux
+## On Linux and macOS
 
 The server is the same code and needs nothing Windows-specific; only
-`start-demo.cmd` is. Two things differ in practice:
+`start-demo.cmd` is. Three things differ in practice:
 
-- Your user needs access to the serial device, which usually means being in
-  the `dialout` group.
+- On Linux your user needs access to the serial device, which usually means
+  being in the `dialout` group. macOS needs nothing: the J-Link console is
+  readable as the logged-in user.
+- On macOS the port is `/dev/cu.usbmodem...`, which is what autodetection
+  returns. If you set `TPM_ONBOARD_PORT` by hand, use that name and not the
+  `/dev/tty.usbmodem...` one, which waits for a carrier the J-Link does not
+  assert.
 - The bus lock is a real `flock` on `/tmp/tpm-bus.lock`, shared with anything
   else that drives the same part, rather than the process-local fallback
   Windows gets. If a serial monitor already owns the board's console the
