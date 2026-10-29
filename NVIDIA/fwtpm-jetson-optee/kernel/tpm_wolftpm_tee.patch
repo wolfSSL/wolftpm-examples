@@ -1,0 +1,81 @@
+--- a/drivers/char/tpm/tpm_ftpm_tee.c
++++ b/drivers/char/tpm/tpm_wolftpm_tee.c
+@@ -28,8 +28,8 @@
+  * https://github.com/microsoft/ms-tpm-20-ref/blob/master/Samples/ARM32-FirmwareTPM/optee_ta/fTPM/include/fTPM.h#L42
+  */
+ static const uuid_t ftpm_ta_uuid =
+-	UUID_INIT(0xBC50D971, 0xD4C9, 0x42C4,
+-		  0x82, 0xCB, 0x34, 0x3F, 0xB7, 0xF3, 0x78, 0x96);
++	UUID_INIT(0x9013BE0E, 0x39B0, 0x4ED4,
++		  0x80, 0xE0, 0x12, 0x42, 0xC0, 0xDA, 0xF3, 0x82);
+ 
+ /**
+  * ftpm_tee_tpm_op_recv() - retrieve fTPM response.
+@@ -355,14 +355,14 @@
+ }
+ 
+ static const struct of_device_id of_ftpm_tee_ids[] = {
+-	{ .compatible = "microsoft,ftpm" },
++	{ .compatible = "wolfssl,wolftpm" },
+ 	{ }
+ };
+ MODULE_DEVICE_TABLE(of, of_ftpm_tee_ids);
+ 
+ static struct platform_driver ftpm_tee_plat_driver = {
+ 	.driver = {
+-		.name = "ftpm-tee",
++		.name = "wolftpm-tee",
+ 		.of_match_table = of_match_ptr(of_ftpm_tee_ids),
+ 	},
+ 	.shutdown = ftpm_plat_tee_shutdown,
+@@ -372,8 +372,8 @@
+ 
+ /* UUID of the fTPM TA */
+ static const struct tee_client_device_id optee_ftpm_id_table[] = {
+-	{UUID_INIT(0xbc50d971, 0xd4c9, 0x42c4,
+-		   0x82, 0xcb, 0x34, 0x3f, 0xb7, 0xf3, 0x78, 0x96)},
++	{UUID_INIT(0x9013be0e, 0x39b0, 0x4ed4,
++		   0x80, 0xe0, 0x12, 0x42, 0xc0, 0xda, 0xf3, 0x82)},
+ 	{}
+ };
+ 
+@@ -382,13 +382,15 @@
+ static struct tee_client_driver ftpm_tee_driver = {
+ 	.id_table	= optee_ftpm_id_table,
+ 	.driver		= {
+-		.name		= "optee-ftpm",
++		.name		= "optee-wolftpm",
+ 		.bus		= &tee_bus_type,
+ 		.probe		= ftpm_tee_probe,
+ 		.remove		= ftpm_tee_remove,
+ 	},
+ };
+ 
++static struct platform_device *wolftpm_pdev;
++
+ static int __init ftpm_mod_init(void)
+ {
+ 	int rc;
+@@ -397,11 +399,22 @@
+ 	if (rc)
+ 		return rc;
+ 
++	/* Bench variant: this trusted application has no device tree node, so
++	 * create the platform device the driver binds to. */
++	wolftpm_pdev = platform_device_register_simple("wolftpm-tee", -1,
++						       NULL, 0);
++	if (IS_ERR(wolftpm_pdev)) {
++		platform_driver_unregister(&ftpm_tee_plat_driver);
++		return PTR_ERR(wolftpm_pdev);
++	}
++
+ 	return driver_register(&ftpm_tee_driver.driver);
+ }
+ 
+ static void __exit ftpm_mod_exit(void)
+ {
++	if (!IS_ERR_OR_NULL(wolftpm_pdev))
++		platform_device_unregister(wolftpm_pdev);
+ 	platform_driver_unregister(&ftpm_tee_plat_driver);
+ 	driver_unregister(&ftpm_tee_driver.driver);
+ }
