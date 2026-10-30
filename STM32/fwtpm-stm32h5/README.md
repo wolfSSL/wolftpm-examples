@@ -3,11 +3,48 @@
 Firmware TPM 2.0 server running on STM32 Cortex-M33.
 Supports TrustZone (CMSE) for hardware-isolated TPM secrets.
 
+## Post-Quantum (TPM 2.0 v1.85)
+
+`MLDSA=1` and `MLKEM=1` add the TPM 2.0 v1.85 ML-DSA (FIPS 204) and ML-KEM
+(FIPS 203) commands. The Makefile adds `wc_mldsa.c`, `wc_mlkem.c`,
+`wc_mlkem_poly.c` and `sha3.c`, and `user_settings.h` sets `WOLFTPM_V185`, the
+wolfCrypt PQC and SHAKE options, and `HAVE_HKDF` for ECC DHKEM. Either may be
+enabled alone; the other is compiled out with `WOLFTPM_NO_MLDSA` /
+`WOLFTPM_NO_MLKEM`.
+
+ML-DSA is built with the wolfCrypt `WOLFSSL_MLDSA_*_SMALL_MEM` options so key
+generation, signing and verification fit the default 48 KB heap; without them
+ML-DSA does not fit the default reservation. Private keys are kept
+as seeds and expanded on each use, so object and NV storage stay small.
+
+Host side, build wolfTPM with `./configure --enable-swtpm=uart --enable-pqc`
+and run `examples/pqc/mldsa_sign -mldsa=44|65|87` and
+`examples/pqc/mlkem_encap -mlkem=512|768|1024`.
+
+## Footprint Measurement (MEASURE=1)
+
+`MEASURE=1` records, for every TPM command and for `FWTPM_Init` at boot, the
+DWT cycle count around `FWTPM_ProcessCommand`, the stack high-water (the
+stack is painted with `0xA5` before each command), the peak bytes allocated
+through `wolfSSL_SetAllocators`, and the `_sbrk` extent. MSPLIM is set to the
+bottom of the stack reservation, so an overflow faults instead of corrupting
+the heap. Results are kept in `g_meas` and read over SWD without a reset:
+
+```bash
+python3 fwtpm_measure.py --sn <ST-LINK serial> --wolftpm /path/to/wolftpm
+```
+
+With `_sbrk` bounded to `_Min_Heap_Size`, shrinking the reservations with
+`EXTRA_LDFLAGS` (see RAM Budget) and rerunning the host tests finds the
+smallest heap and stack a given command set needs. Leave `MEASURE` off for
+production builds.
+
 ## Tested Targets
 
 | Board | Chip | Status | Date |
 |-------|------|--------|------|
 | NUCLEO-H563ZI | STM32H563ZI (Cortex-M33, 250MHz) | TZEN=0 and TZEN=1 verified: boot, Startup/SelfTest/GetRandom/GetCapability, wolfTPM `caps` over UART, append-only NV persistence across reboots | 2026-06-24 |
+| NUCLEO-H563ZI | STM32H563ZI (Cortex-M33, 250MHz) | TZEN=1 `MLDSA=1 MLKEM=1` verified at the default heap/stack: wolfTPM `examples/pqc` `mldsa_sign` (ML-DSA-44/65/87) and `mlkem_encap` (ML-KEM-512/768/1024), `wrap/wrap_test` | 2026-10-30 |
 
 ## Prerequisites
 
@@ -28,7 +65,7 @@ Supports TrustZone (CMSE) for hardware-isolated TPM secrets.
 cd STM32/fwtpm-stm32h5
 
 # Standard build (TZEN=0, no semihosting). The Makefile defaults to
-# STM32Cube_FW_H5_V1.5.1; pass STM32CUBE=<path> if a different SDK is installed.
+# STM32Cube_FW_H5_V1.6.0; pass STM32CUBE=<path> if a different SDK is installed.
 make
 
 # With semihosting debug output (printf via SWD, UART free for TPM protocol)
@@ -43,6 +80,12 @@ make SEMIHOSTING=1
 #   stm32h5x option_write 0 0x074 0xC3000000 0xFF000000   # revert
 # Follow either command with a board power-cycle (or OpenOCD reset).
 make TZEN=1
+
+# TPM 2.0 v1.85 post-quantum: ML-DSA and/or ML-KEM (see Post-Quantum below)
+make TZEN=1 MLDSA=1 MLKEM=1
+
+# Footprint/timing instrumentation (see Footprint Measurement below)
+make TZEN=1 MEASURE=1
 
 # Override wolfTPM / wolfSSL source paths
 make WOLFTPM_DIR=/path/to/wolftpm WOLFSSL_DIR=/path/to/wolfssl
@@ -206,13 +249,12 @@ across configurations:
 
 | Region | Size | Notes |
 |--------|------|-------|
-| Static BSS (incl. `FWTPM_CTX`) | ~95 KB | `FWTPM_CTX` alone is 97136 bytes |
-| Heap reservation | 48 KB | `_Min_Heap_Size` |
+| Static BSS (incl. `FWTPM_CTX`) | ~114 KB, ~161 KB with PQC | `FWTPM_CTX` is 116184 bytes, 164344 with `MLDSA=1 MLKEM=1` |
+| Heap reservation | 48 KB | `_Min_Heap_Size`; `_sbrk` fails beyond it rather than growing into the stack |
 | Stack reservation | 48 KB | `_Min_Stack_Size`, top of RAM |
-| **Total RAM used** | **~191 KB** | |
+| **Total RAM used** | **~210 KB, ~257 KB with PQC** | |
 
-TZEN=0 has 640 KB SRAM available; TZEN=1 has 320 KB Secure SRAM, leaving about
-129 KB headroom at these reservations.
+TZEN=0 has 640 KB SRAM available; TZEN=1 has 320 KB Secure SRAM.
 
 Both reservations are overridable without editing the linker script:
 

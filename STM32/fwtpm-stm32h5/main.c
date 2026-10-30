@@ -28,6 +28,10 @@
 #include <wolftpm/fwtpm/fwtpm.h>
 #include <wolftpm/fwtpm/fwtpm_nv.h>
 #include <wolftpm/fwtpm/fwtpm_command.h>
+#ifdef FWTPM_MEASURE
+#include <wolfssl/wolfcrypt/memory.h>
+#endif
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -56,6 +60,200 @@ static FWTPM_CTX g_ctx;
 
 /* UART command loop */
 static void FwTPM_UartCommandLoop(FWTPM_CTX* ctx);
+
+/* Linker script symbols (heap/stack reservation) */
+extern char _end;
+extern char _estack;
+extern char _Min_Heap_Size;
+extern char _Min_Stack_Size;
+
+#ifdef FWTPM_MEASURE
+/* Footprint and timing instrumentation (MEASURE=1), read back over SWD from
+ * g_meas with fwtpm_measure.py. Per command it records DWT cycles, the stack
+ * high-water (stack repainted before each dispatch), the wolfSSL allocator
+ * peak and the _sbrk extent. MSPLIM faults a stack overflow instead of
+ * letting it corrupt the heap. */
+#define MEAS_MAGIC      0x4D454153u
+#ifndef MEAS_MAX_LOG
+#define MEAS_MAX_LOG    128
+#endif
+#define MEAS_PAINT      0xA5A5A5A5u
+
+typedef struct {
+    uint32_t cc;        /* command code (0 = FWTPM_Init at boot) */
+    uint32_t cycles;    /* DWT cycles, wraps after ~17 s at 250 MHz */
+    uint32_t ms;        /* HAL tick, for commands longer than that */
+    uint32_t stack;     /* stack high-water, bytes */
+    uint32_t heapPeak;  /* wolfSSL allocator peak above entry, bytes */
+    uint32_t sbrkPeak;  /* _sbrk extent after the command, bytes */
+    uint32_t rc;        /* TPM response code */
+    uint32_t cmdSz;     /* command size, bytes */
+} MeasEntry;
+
+typedef struct {
+    uint32_t magic;
+    uint32_t ctxSize;
+    uint32_t count;
+    uint32_t stackPeak;
+    uint32_t heapPeak;
+    uint32_t sbrkPeak;
+    uint32_t heapCur;
+    uint32_t allocFail;
+    uint32_t stackLimit;
+    uint32_t heapLimit;
+    uint32_t heapPeakAll;
+    uint32_t allocFailSz;
+    MeasEntry log[MEAS_MAX_LOG];
+} MeasState;
+
+volatile MeasState g_meas;
+uint32_t g_measSbrkPeak;
+
+/* Allocation header so free can account the size */
+typedef struct {
+    uint32_t sz;
+    uint32_t pad;
+} MeasHdr;
+
+static uint32_t g_measT0;
+static uint32_t g_measMs0;
+static uint32_t g_measHeap0;
+
+static void* MeasMalloc(size_t size)
+{
+    MeasHdr* h = (MeasHdr*)malloc(size + sizeof(MeasHdr));
+    if (h == NULL) {
+        g_meas.allocFail++;
+        g_meas.allocFailSz = (uint32_t)size;
+        return NULL;
+    }
+    h->sz = (uint32_t)size;
+    g_meas.heapCur += (uint32_t)size;
+    if (g_meas.heapCur > g_meas.heapPeak) {
+        g_meas.heapPeak = g_meas.heapCur;
+    }
+    return h + 1;
+}
+
+static void MeasFree(void* ptr)
+{
+    MeasHdr* h;
+    if (ptr != NULL) {
+        h = (MeasHdr*)ptr - 1;
+        g_meas.heapCur -= h->sz;
+        free(h);
+    }
+}
+
+static void* MeasRealloc(void* ptr, size_t size)
+{
+    void* n;
+    uint32_t old = 0;
+    if (ptr != NULL) {
+        old = ((MeasHdr*)ptr - 1)->sz;
+    }
+    n = MeasMalloc(size);
+    if (n != NULL && ptr != NULL) {
+        memcpy(n, ptr, (old < size) ? old : size);
+        MeasFree(ptr);
+    }
+    return n;
+}
+
+static uint32_t MeasStackBottom(void)
+{
+    return (uint32_t)&_estack - (uint32_t)&_Min_Stack_Size;
+}
+
+static void MeasPaint(void)
+{
+    volatile uint32_t* p = (volatile uint32_t*)MeasStackBottom();
+    volatile uint32_t* end = (volatile uint32_t*)(__get_MSP() - 64);
+    while (p < end) {
+        *p++ = MEAS_PAINT;
+    }
+}
+
+static uint32_t MeasStackUsed(void)
+{
+    const uint32_t* p = (const uint32_t*)MeasStackBottom();
+    while ((uint32_t)p < (uint32_t)&_estack && *p == MEAS_PAINT) {
+        p++;
+    }
+    return (uint32_t)&_estack - (uint32_t)p;
+}
+
+static void MeasInit(void)
+{
+    memset((void*)&g_meas, 0, sizeof(g_meas));
+    g_meas.ctxSize = (uint32_t)sizeof(FWTPM_CTX);
+    g_meas.stackLimit = (uint32_t)&_Min_Stack_Size;
+    g_meas.heapLimit = (uint32_t)&_Min_Heap_Size;
+    __set_MSPLIM(MeasStackBottom());
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    DWT->CYCCNT = 0;
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+    wolfSSL_SetAllocators(MeasMalloc, MeasFree, MeasRealloc);
+    g_meas.magic = MEAS_MAGIC;
+}
+
+static void MeasBegin(void)
+{
+    MeasPaint();
+    g_measHeap0 = g_meas.heapCur;
+    g_meas.heapPeak = g_meas.heapCur;
+    g_measMs0 = HAL_GetTick();
+    g_measT0 = DWT->CYCCNT;
+}
+
+static void MeasEnd(uint32_t cc, const uint8_t* rsp, int rspSize,
+    uint32_t cmdSz)
+{
+    uint32_t cyc = DWT->CYCCNT - g_measT0;
+    uint32_t ms = HAL_GetTick() - g_measMs0;
+    uint32_t stk = MeasStackUsed();
+    volatile MeasEntry* e = &g_meas.log[g_meas.count % MEAS_MAX_LOG];
+
+    e->cc = cc;
+    e->cycles = cyc;
+    e->ms = ms;
+    e->stack = stk;
+    e->heapPeak = g_meas.heapPeak - g_measHeap0;
+    e->sbrkPeak = g_measSbrkPeak;
+    e->rc = 0xFFFFFFFFu;
+    if (rspSize >= 10) {
+        e->rc = ((uint32_t)rsp[6] << 24) | ((uint32_t)rsp[7] << 16) |
+                ((uint32_t)rsp[8] << 8) | (uint32_t)rsp[9];
+    }
+    e->cmdSz = cmdSz;
+    if (g_meas.heapPeak > g_meas.heapPeakAll) {
+        g_meas.heapPeakAll = g_meas.heapPeak;
+    }
+    if (stk > g_meas.stackPeak) {
+        g_meas.stackPeak = stk;
+    }
+    g_meas.sbrkPeak = g_measSbrkPeak;
+    g_meas.count++;
+}
+
+static int MeasProcessCommand(FWTPM_CTX* ctx, uint8_t* cmdBuf, int cmdSize,
+    uint8_t* rspBuf, int* rspSize, int locality)
+{
+    int rc;
+    uint32_t cc = 0;
+
+    if (cmdSize >= 10) {
+        cc = ((uint32_t)cmdBuf[6] << 24) | ((uint32_t)cmdBuf[7] << 16) |
+             ((uint32_t)cmdBuf[8] << 8) | (uint32_t)cmdBuf[9];
+    }
+    MeasBegin();
+    rc = FWTPM_ProcessCommand(ctx, cmdBuf, cmdSize, rspBuf, rspSize,
+        locality);
+    MeasEnd(cc, rspBuf, *rspSize, (uint32_t)cmdSize);
+    return rc;
+}
+#define FWTPM_ProcessCommand MeasProcessCommand
+#endif /* FWTPM_MEASURE */
 #ifdef FWTPM_SELFTEST
 static int FwTPM_RunSelfTest(FWTPM_CTX* ctx);
 #endif
@@ -130,8 +328,15 @@ int main(void)
     /* Register clock HAL */
     FWTPM_Clock_STM32_Init(ctx);
 
+#ifdef FWTPM_MEASURE
+    MeasInit();
+    MeasBegin();
+#endif
     /* Initialize fwTPM */
     rc = FWTPM_Init(ctx);
+#ifdef FWTPM_MEASURE
+    MeasEnd(0, NULL, 0, 0);
+#endif
     if (rc != 0) {
         printf("ERROR: FWTPM_Init failed: %d\r\n", rc);
         Error_Handler();
@@ -142,6 +347,12 @@ int main(void)
     printf("fwTPM v%s initialized OK\r\n", FWTPM_GetVersionString());
     printf("  FWTPM_CTX size: %u bytes\r\n",
         (unsigned int)sizeof(FWTPM_CTX));
+#ifdef FWTPM_MEASURE
+    printf("  MEASURE: g_meas=%p, FWTPM_Init stack %u heap %u sbrk %u\r\n",
+        (void*)&g_meas, (unsigned int)g_meas.log[0].stack,
+        (unsigned int)g_meas.log[0].heapPeak,
+        (unsigned int)g_meas.log[0].sbrkPeak);
+#endif
     printf("  NV flash: 0x%08X (%u KB)\r\n",
         (unsigned int)FWTPM_NV_FLASH_BASE,
         (unsigned int)(FWTPM_NV_FLASH_SIZE / 1024));
@@ -601,7 +812,6 @@ int _kill(int pid, int sig) { (void)pid; (void)sig; return -1; }
 
 #ifndef ARM_SEMIHOSTING
 void* _sbrk(int incr);
-extern char _end; /* from linker script */
 void* _sbrk(int incr)
 {
     static char* heap_end = 0;
@@ -610,7 +820,17 @@ void* _sbrk(int incr)
         heap_end = &_end;
     }
     prev_heap_end = heap_end;
+    /* Fail past the linker heap reservation rather than grow into the stack */
+    if (heap_end + incr > &_end + (uint32_t)&_Min_Heap_Size) {
+        errno = ENOMEM;
+        return (void*)-1;
+    }
     heap_end += incr;
+#ifdef FWTPM_MEASURE
+    if ((uint32_t)(heap_end - &_end) > g_measSbrkPeak) {
+        g_measSbrkPeak = (uint32_t)(heap_end - &_end);
+    }
+#endif
     return (void*)prev_heap_end;
 }
 #endif

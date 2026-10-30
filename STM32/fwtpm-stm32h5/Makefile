@@ -2,6 +2,8 @@
 #
 # Usage:
 #   make                    Build fwtpm_stm32h5.bin
+#   make MLDSA=1 MLKEM=1    Add TPM 2.0 v1.85 post-quantum ML-DSA / ML-KEM
+#   make MEASURE=1          Add footprint/timing instrumentation
 #   make flash              Flash via STM32_Programmer_CLI (SWD)
 #   make clean              Remove build artifacts
 #
@@ -15,7 +17,7 @@
 # ========================================================================= #
 # Configurable paths                                                        #
 # ========================================================================= #
-STM32CUBE   ?= $(HOME)/STM32Cube/Repository/STM32Cube_FW_H5_V1.5.1
+STM32CUBE   ?= $(HOME)/STM32Cube/Repository/STM32Cube_FW_H5_V1.6.0
 WOLFTPM_DIR ?= ../../../wolftpm
 WOLFSSL_DIR ?= ../../../wolfssl
 PREFIX      ?= arm-none-eabi-
@@ -57,6 +59,23 @@ endif
 ifeq ($(SELFTEST),1)
 CFLAGS += -DFWTPM_SELFTEST
 endif
+
+# Footprint/timing instrumentation (MEASURE=1), read with fwtpm_measure.py
+MEASURE ?= 0
+ifeq ($(MEASURE),1)
+CFLAGS += -DFWTPM_MEASURE
+endif
+
+# Post-quantum (TPM 2.0 v1.85): MLDSA=1 and/or MLKEM=1
+MLDSA ?= 0
+MLKEM ?= 0
+ifeq ($(MLDSA),1)
+CFLAGS += -DFWTPM_PQC_MLDSA
+endif
+ifeq ($(MLKEM),1)
+CFLAGS += -DFWTPM_PQC_MLKEM
+endif
+
 ifeq ($(SEMIHOSTING),1)
 CFLAGS += -DARM_SEMIHOSTING -DDEBUG_WOLFTPM
 CFLAGS += -Wall -Os -g -ffunction-sections -fdata-sections -fno-common
@@ -176,6 +195,16 @@ WC_SRC = \
 	$(WC_DIR)/misc.c \
 	$(WC_DIR)/cryptocb.c \
 	$(WC_DIR)/kdf.c
+
+ifneq ($(MLDSA)$(MLKEM),00)
+WC_SRC += $(WC_DIR)/sha3.c
+endif
+ifeq ($(MLDSA),1)
+WC_SRC += $(WC_DIR)/wc_mldsa.c
+endif
+ifeq ($(MLKEM),1)
+WC_SRC += $(WC_DIR)/wc_mlkem.c $(WC_DIR)/wc_mlkem_poly.c
+endif
 
 # wolfSSL STM32 HAL port
 WC_SRC += $(WOLFSSL_DIR)/wolfcrypt/src/port/st/stm32.c
