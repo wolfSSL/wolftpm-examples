@@ -3,6 +3,7 @@
 # Usage:
 #   make                    Build fwtpm_stm32h5.bin
 #   make MLDSA=1 MLKEM=1    Add TPM 2.0 v1.85 post-quantum ML-DSA / ML-KEM
+#   make MEASURE=1          Add footprint/timing instrumentation
 #   make flash              Flash via STM32_Programmer_CLI (SWD)
 #   make clean              Remove build artifacts
 #
@@ -16,7 +17,7 @@
 # ========================================================================= #
 # Configurable paths                                                        #
 # ========================================================================= #
-STM32CUBE   ?= $(HOME)/STM32Cube/Repository/STM32Cube_FW_H5_V1.5.1
+STM32CUBE   ?= $(HOME)/STM32Cube/Repository/STM32Cube_FW_H5_V1.6.0
 WOLFTPM_DIR ?= ../../../wolftpm
 WOLFSSL_DIR ?= ../../../wolfssl
 PREFIX      ?= arm-none-eabi-
@@ -57,6 +58,12 @@ CFLAGS += -DTZEN_ENABLED=0
 endif
 ifeq ($(SELFTEST),1)
 CFLAGS += -DFWTPM_SELFTEST
+endif
+
+# Footprint/timing instrumentation (MEASURE=1), read with fwtpm_measure.py
+MEASURE ?= 0
+ifeq ($(MEASURE),1)
+CFLAGS += -DFWTPM_MEASURE
 endif
 
 # Post-quantum (TPM 2.0 v1.85): MLDSA=1 and/or MLKEM=1

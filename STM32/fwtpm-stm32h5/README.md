@@ -26,6 +26,25 @@ and run `examples/pqc/pqc_ctrl --mldsa=65 --mlkem=768`,
 `MLDSA=1` / `MLKEM=1` these fail with `TPM_RC_TYPE`, since the TPM rejects the
 unsupported public key algorithm.
 
+## Footprint Measurement (MEASURE=1)
+
+`MEASURE=1` records, for every TPM command (UART or NSC) and for `FWTPM_Init`
+at boot, the DWT cycle count around `FWTPM_ProcessCommand`, the stack
+high-water (the stack is painted with `0xA5` before each command), the peak
+bytes allocated through `wolfSSL_SetAllocators`, and the `_sbrk` extent.
+MSPLIM is set to the bottom of the stack reservation, so an overflow faults
+instead of corrupting the heap. Results are kept in `g_meas` and read over SWD
+without a reset:
+
+```bash
+python3 fwtpm_measure.py --sn <ST-LINK serial> --wolftpm /path/to/wolftpm
+```
+
+With `_sbrk` bounded to `_Min_Heap_Size`, shrinking the reservations with
+`EXTRA_LDFLAGS` (see RAM Budget) and rerunning the host tests finds the
+smallest heap and stack a given command set needs. Leave `MEASURE` off for
+production builds.
+
 ## Tested Targets
 
 | Board | Chip | Status | Date |
@@ -52,7 +71,7 @@ unsupported public key algorithm.
 cd STM32/fwtpm-stm32h5
 
 # Standard build (TZEN=0, no semihosting). The Makefile defaults to
-# STM32Cube_FW_H5_V1.5.1; pass STM32CUBE=<path> if a different SDK is installed.
+# STM32Cube_FW_H5_V1.6.0; pass STM32CUBE=<path> if a different SDK is installed.
 make
 
 # With semihosting debug output (printf via SWD, UART free for TPM protocol)
@@ -70,6 +89,9 @@ make TZEN=1
 
 # TPM 2.0 v1.85 post-quantum: ML-DSA and/or ML-KEM (see Post-Quantum below)
 make TZEN=1 MLDSA=1 MLKEM=1
+
+# Footprint/timing instrumentation (see Footprint Measurement below)
+make TZEN=1 MEASURE=1
 
 # Override wolfTPM / wolfSSL source paths
 make WOLFTPM_DIR=/path/to/wolftpm WOLFSSL_DIR=/path/to/wolfssl
@@ -234,7 +256,7 @@ across configurations:
 | Region | Size | Notes |
 |--------|------|-------|
 | Static BSS (incl. `FWTPM_CTX`) | ~114 KB, ~161 KB with PQC | `FWTPM_CTX` is 116184 bytes, 164344 with `MLDSA=1 MLKEM=1` |
-| Heap reservation | 48 KB | `_Min_Heap_Size` |
+| Heap reservation | 48 KB | `_Min_Heap_Size`; `_sbrk` fails beyond it rather than growing into the stack |
 | Stack reservation | 48 KB | `_Min_Stack_Size`, top of RAM |
 | **Total RAM used** | **~210 KB, ~257 KB with PQC** | |
 
