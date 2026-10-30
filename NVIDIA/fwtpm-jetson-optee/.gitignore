@@ -1,0 +1,23 @@
+# Created by ta/prep.sh
+ta/wc/
+ta/wt/
+ta/port/
+ta/inc-cfg
+ta/inc-wolfssl
+ta/inc-wolftpm
+ta/uuid.mk
+ta/uuid_macro.inc
+
+# OP-TEE TA build output
+ta/*.ta
+ta/*.elf
+ta/*.dmp
+ta/*.map
+ta/*.o
+ta/.*.cmd
+ta/.*.d
+ta/dyn_list
+ta/ta.lds
+
+native/fwtpm_native
+host/fwtpm_client
