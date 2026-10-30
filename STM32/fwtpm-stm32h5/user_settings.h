@@ -101,6 +101,30 @@
 #define WOLFSSL_SHA512
 #define HAVE_SHA512
 
+/* Post-quantum (TPM 2.0 v1.85), enabled from the Makefile MLDSA=1 / MLKEM=1 */
+#if defined(FWTPM_PQC_MLDSA) || defined(FWTPM_PQC_MLKEM)
+    #define WOLFTPM_V185
+    #define WOLFSSL_SHA3
+    #define WOLFSSL_SHAKE128
+    #define WOLFSSL_SHAKE256
+#endif
+#ifdef FWTPM_PQC_MLDSA
+    #define WOLFSSL_HAVE_MLDSA
+    /* Bound ML-DSA working memory so PQC fits the default heap */
+    #define WOLFSSL_MLDSA_MAKE_KEY_SMALL_MEM
+    #define WOLFSSL_MLDSA_SIGN_SMALL_MEM
+    #define WOLFSSL_MLDSA_VERIFY_SMALL_MEM
+#else
+    #define WOLFTPM_NO_MLDSA
+#endif
+#ifdef FWTPM_PQC_MLKEM
+    #define WOLFSSL_HAVE_MLKEM
+    #define WOLFSSL_WC_MLKEM
+    #define HAVE_HKDF /* ECC DHKEM (RFC 9180) for Encapsulate/Decapsulate */
+#else
+    #define WOLFTPM_NO_MLKEM
+#endif
+
 /* RNG: use STM32 hardware RNG directly via custom callback */
 #define HAVE_HASHDRBG
 #define WC_RESEED_INTERVAL (1000000)
@@ -135,8 +159,10 @@ extern int custom_rand_gen_block(unsigned char* output, unsigned int sz);
 #define NO_DH
 /* Note: SHA-1 is needed by RSA OAEP (MGF1 default hash) */
 #define NO_MD5
+#if !defined(FWTPM_PQC_MLDSA) && !defined(FWTPM_PQC_MLKEM)
 #define WOLFSSL_NO_SHAKE128
 #define WOLFSSL_NO_SHAKE256
+#endif
 #define NO_ASN_TIME     /* no RTC configured yet */
 #define NO_SESSION_CACHE
 #define BENCH_EMBEDDED
