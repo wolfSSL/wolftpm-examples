@@ -2,6 +2,7 @@
 #
 # Usage:
 #   make                    Build fwtpm_stm32h5.bin
+#   make MLDSA=1 MLKEM=1    Add TPM 2.0 v1.85 post-quantum ML-DSA / ML-KEM
 #   make flash              Flash via STM32_Programmer_CLI (SWD)
 #   make clean              Remove build artifacts
 #
@@ -57,6 +58,17 @@ endif
 ifeq ($(SELFTEST),1)
 CFLAGS += -DFWTPM_SELFTEST
 endif
+
+# Post-quantum (TPM 2.0 v1.85): MLDSA=1 and/or MLKEM=1
+MLDSA ?= 0
+MLKEM ?= 0
+ifeq ($(MLDSA),1)
+CFLAGS += -DFWTPM_PQC_MLDSA
+endif
+ifeq ($(MLKEM),1)
+CFLAGS += -DFWTPM_PQC_MLKEM
+endif
+
 ifeq ($(SEMIHOSTING),1)
 CFLAGS += -DARM_SEMIHOSTING -DDEBUG_WOLFTPM
 CFLAGS += -Wall -Os -g -ffunction-sections -fdata-sections -fno-common
@@ -177,6 +189,16 @@ WC_SRC = \
 	$(WC_DIR)/cryptocb.c \
 	$(WC_DIR)/kdf.c
 
+ifneq ($(MLDSA)$(MLKEM),00)
+WC_SRC += $(WC_DIR)/sha3.c
+endif
+ifeq ($(MLDSA),1)
+WC_SRC += $(WC_DIR)/wc_mldsa.c
+endif
+ifeq ($(MLKEM),1)
+WC_SRC += $(WC_DIR)/wc_mlkem.c $(WC_DIR)/wc_mlkem_poly.c
+endif
+
 # wolfSSL STM32 HAL port
 WC_SRC += $(WOLFSSL_DIR)/wolfcrypt/src/port/st/stm32.c
 
@@ -201,13 +223,22 @@ VPATH = . \
 	$(WC_DIR) \
 	$(WOLFSSL_DIR)/wolfcrypt/src/port/st
 
-.PHONY: all flash clean
+.PHONY: all flash clean FORCE
 
 all: $(TARGET).bin
 	@$(SIZE) $(TARGET).elf
 
 $(TARGET).elf: $(OBJS)
 	$(LD) $(LDFLAGS) -o $@ $^
+
+# Objects depend on the recorded CFLAGS, so changing TZEN, MLDSA, MLKEM or
+# another option rebuilds everything instead of reusing the previous build.
+.cflags: FORCE
+	@echo '$(CFLAGS)' | cmp -s - $@ || echo '$(CFLAGS)' > $@
+
+$(OBJS): .cflags
+
+FORCE:
 
 $(TARGET).bin: $(TARGET).elf
 	$(OBJCOPY) -O binary $< $@
@@ -225,4 +256,4 @@ flash: $(TARGET).bin
 	STM32_Programmer_CLI -c port=SWD -w $< 0x08000000 -v -rst
 
 clean:
-	rm -f $(OBJS) $(TARGET).elf $(TARGET).bin $(TARGET).hex $(TARGET).map fwtpm_nsc_lib.o
+	rm -f *.o .cflags $(TARGET).elf $(TARGET).bin $(TARGET).hex $(TARGET).map fwtpm_nsc_lib.o
