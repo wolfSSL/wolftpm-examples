@@ -3,11 +3,35 @@
 Firmware TPM 2.0 server running on STM32 Cortex-M33.
 Supports TrustZone (CMSE) for hardware-isolated TPM secrets.
 
+## Post-Quantum (TPM 2.0 v1.85)
+
+`MLDSA=1` and `MLKEM=1` add the TPM 2.0 v1.85 ML-DSA (FIPS 204) and ML-KEM
+(FIPS 203) commands. The Makefile adds `wc_mldsa.c`, `wc_mlkem.c`,
+`wc_mlkem_poly.c` and `sha3.c`, and `user_settings.h` sets `WOLFTPM_V185`, the
+wolfCrypt PQC and SHAKE options, and `HAVE_HKDF` for ECC DHKEM. Either may be
+enabled alone; the other is compiled out with `WOLFTPM_NO_MLDSA` /
+`WOLFTPM_NO_MLKEM`. The Makefile records its flags in `.cflags` and rebuilds
+every object when they change, so switching these options (or `TZEN`) does not
+need a `make clean` first.
+
+ML-DSA is built with the wolfCrypt `WOLFSSL_MLDSA_*_SMALL_MEM` options so key
+generation, signing and verification fit the default 48 KB heap; without them
+ML-DSA does not fit the default reservation. Private keys are kept
+as seeds and expanded on each use, so object and NV storage stay small.
+
+Host side, build wolfTPM with `./configure --enable-swtpm=uart --enable-pqc`
+and run `examples/pqc/pqc_ctrl --mldsa=65 --mlkem=768`,
+`examples/pqc/mldsa_sign -mldsa=44|65|87` or
+`examples/pqc/mlkem_encap -mlkem=512|768|1024`. Against an image built without
+`MLDSA=1` / `MLKEM=1` these fail with `TPM_RC_TYPE`, since the TPM rejects the
+unsupported public key algorithm.
+
 ## Tested Targets
 
 | Board | Chip | Status | Date |
 |-------|------|--------|------|
 | NUCLEO-H563ZI | STM32H563ZI (Cortex-M33, 250MHz) | TZEN=0 and TZEN=1 verified: boot, Startup/SelfTest/GetRandom/GetCapability, wolfTPM `caps` over UART, append-only NV persistence across reboots | 2026-06-24 |
+| NUCLEO-H563ZI | STM32H563ZI (Cortex-M33, 250MHz) | TZEN=1 `MLDSA=1 MLKEM=1` verified at the default heap/stack: wolfTPM `examples/pqc` `pqc_ctrl`, `mldsa_sign` (ML-DSA-44/65/87) and `mlkem_encap` (ML-KEM-512/768/1024), `wrap/wrap_test` | 2026-11-02 |
 
 ## Prerequisites
 
@@ -43,6 +67,9 @@ make SEMIHOSTING=1
 #   stm32h5x option_write 0 0x074 0xC3000000 0xFF000000   # revert
 # Follow either command with a board power-cycle (or OpenOCD reset).
 make TZEN=1
+
+# TPM 2.0 v1.85 post-quantum: ML-DSA and/or ML-KEM (see Post-Quantum below)
+make TZEN=1 MLDSA=1 MLKEM=1
 
 # Override wolfTPM / wolfSSL source paths
 make WOLFTPM_DIR=/path/to/wolftpm WOLFSSL_DIR=/path/to/wolfssl
@@ -206,13 +233,12 @@ across configurations:
 
 | Region | Size | Notes |
 |--------|------|-------|
-| Static BSS (incl. `FWTPM_CTX`) | ~95 KB | `FWTPM_CTX` alone is 97136 bytes |
+| Static BSS (incl. `FWTPM_CTX`) | ~114 KB, ~161 KB with PQC | `FWTPM_CTX` is 116184 bytes, 164344 with `MLDSA=1 MLKEM=1` |
 | Heap reservation | 48 KB | `_Min_Heap_Size` |
 | Stack reservation | 48 KB | `_Min_Stack_Size`, top of RAM |
-| **Total RAM used** | **~191 KB** | |
+| **Total RAM used** | **~210 KB, ~257 KB with PQC** | |
 
-TZEN=0 has 640 KB SRAM available; TZEN=1 has 320 KB Secure SRAM, leaving about
-129 KB headroom at these reservations.
+TZEN=0 has 640 KB SRAM available; TZEN=1 has 320 KB Secure SRAM.
 
 Both reservations are overridable without editing the linker script:
 
