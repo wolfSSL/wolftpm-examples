@@ -28,6 +28,12 @@
  * before the non-secure world is released; never modified after). */
 extern FWTPM_CTX* g_fwtpmCtx;
 
+#ifdef FWTPM_MEASURE
+extern int MeasProcessCommand(FWTPM_CTX* ctx, uint8_t* cmdBuf, int cmdSize,
+    uint8_t* rspBuf, int* rspSize, int locality);
+#define FWTPM_ProcessCommand MeasProcessCommand
+#endif
+
 FWTPM_NSC_ENTRY
 int FWTPM_NSC_ExecuteCommand(const uint8_t* cmdBuf, uint32_t cmdSz,
                               uint8_t* rspBuf, uint32_t* rspSz)
