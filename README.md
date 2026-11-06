@@ -36,6 +36,19 @@ Firmware TPM 2.0 implementation for NUCLEO-H563ZI (Cortex-M33). Supports TrustZo
 
 Added in https://github.com/wolfSSL/wolftpm-examples/pull/1
 
+## NVIDIA Jetson Orin fwTPM in OP-TEE
+
+See [NVIDIA/fwtpm-jetson-optee](NVIDIA/fwtpm-jetson-optee).
+
+Firmware TPM 2.0 running as an OP-TEE trusted application in the secure world
+on a Jetson Orin, with unmodified wolfTPM examples driving it from Linux over
+libteec. NV in OP-TEE secure storage, journal integrity key derived from the
+hardware unique key.
+
+The Jetson already ships a firmware TPM, but it reports TPM 2.0 spec revision
+1.62 and so has no post-quantum support. This port puts a revision 1.85 TPM on
+the same silicon alongside it, with ML-DSA and ML-KEM.
+
 ## Xilinx ZCU102 fwTPM on Cortex-R5 Lock-Step
 
 See [Xilinx/fwtpm-zcu102-r5](Xilinx/fwtpm-zcu102-r5).
