@@ -3,6 +3,11 @@
  * Device tree overlay to disable cpu4 (U54 hart 4) for AMP fwTPM.
  * Hart 4 runs fwTPM in bare-metal M-mode; Linux must not schedule on it.
  *
+ * fragment@2 disables the Linux User Crypto driver (mchp-crypto-sbi) at
+ * 0x22000000. Its boot self-tests fail with -524 (ENOTSUPP) on the HSS SBI
+ * crypto service, and the driver's error path can then oops in
+ * crypto_dequeue_request and hang Linux at boot.
+ *
  * Shared-memory reservation:
  *   - LIM_CACHED / L1D_OFF / IHC builds keep the fwTPM TIS mailbox +
  *     console ring in L2 LIM at 0x08000000 (16KB). LIM is not part of
@@ -62,6 +67,13 @@
 					no-map;
 				};
 			};
+		};
+	};
+
+	fragment@2 {
+		target-path = "/fabric-bus@22000000/crypto@22000000";
+		__overlay__ {
+			status = "disabled";
 		};
 	};
 };

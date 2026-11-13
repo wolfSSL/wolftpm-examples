@@ -159,7 +159,7 @@ firmware/fwtpm-u54/
 ├── fwtpm_clock_mpfs.c          MTIME-based FWTPM_CLOCK_HAL get_ms()
 ├── fwtpm_trng_scb.c            System Controller TRNG seed (FWTPM_RNG=SCB_NONCE)
 ├── amp-fwtpm.yaml              HSS payload generator config
-├── mpfs-fwtpm-disable-cpu4.dts Linux DTS overlay (disables cpu4)
+├── mpfs-fwtpm-disable-cpu4.dts Linux DTS overlay (disables cpu4, User Crypto)
 └── .gitignore
 ```
 
@@ -228,6 +228,13 @@ boot-debug fields + console ring through `/dev/mem`. The L2 LIM region at
 it even under a stock `CONFIG_STRICT_DEVMEM=y` kernel -- no kernel rebuild
 needed (verified on the Video Kit BSP). The only device-tree change
 required is the cpu4-disable overlay so Linux releases hart 4.
+
+> **Disable Linux's User Crypto driver.** On the Video Kit Yocto BSP the
+> `mchp-crypto-sbi` driver (`crypto@22000000`) fails its boot self-tests
+> with `-524` and can then oops in `crypto_dequeue_request`, hanging
+> Linux at boot whether or not the fwTPM runs. The overlay disables that
+> node; without the overlay, `fdt set /fabric-bus@22000000/crypto@22000000
+> status disabled` in u-boot before `bootm go` does the same.
 
 For the default `DDR_WCB` build the live mailbox and console ring sit in
 the non-cached DDR window at `0xC0000000`, while the boot/trap breadcrumbs
@@ -381,7 +388,10 @@ the working stand-in until then.
    confirm no other master (HSS at runtime, a Linux `mss-sys-services`
    driver) drives it while hart 4 issues requests. Under the
    wolfBoot-hosted track this is the same path wolfBoot exposes as
-   `mpfs_nonce()`.
+   `mpfs_nonce()`. `FWTPM_RNG=MEMUSE` instead seeds the DRBG from wolfSSL's
+   wolfEntropy MemUse software entropy source (SP800-90B), timed with the
+   hart's `mcycle` counter; it needs no System Controller access and adds
+   `wolfentropy.c`, `sha3.c` and a 128 KB entropy buffer.
 5. **PQC** — enable ML-KEM / ML-DSA in `user_settings.h` and
    benchmark on hart 4 (600 MHz RV64GC, no FPU). Note ML-DSA-65/87
    raise `FWTPM_MAX_COMMAND_SIZE` to 8192, which would also grow the

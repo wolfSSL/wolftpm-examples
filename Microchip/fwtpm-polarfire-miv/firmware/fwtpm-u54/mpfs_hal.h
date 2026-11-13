@@ -110,7 +110,9 @@ void mpfs_console_putc(FWTPM_CONSOLE_RING *ring, char c);
 
 /* RNG seed callbacks (CUSTOM_RAND_GENERATE_SEED). Selected by FWTPM_RNG:
  *   SCB_NONCE (default) -- mpfs_rng_seed_scb, System Controller HW TRNG
- *   JITTER              -- mpfs_rng_seed_cb,  MTIME jitter, DEVELOPMENT ONLY */
+ *   JITTER              -- mpfs_rng_seed_cb,  MTIME jitter, DEVELOPMENT ONLY
+ *   MEMUSE              -- mpfs_rng_seed_memuse, wolfEntropy; prototyped in
+ *                          user_settings.h for the wolfSSL sources */
 int mpfs_rng_seed_cb(unsigned char *output, unsigned int sz);
 int mpfs_rng_seed_scb(unsigned char *output, unsigned int sz);
 
