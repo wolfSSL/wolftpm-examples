@@ -159,7 +159,7 @@ firmware/fwtpm-u54/
 ├── fwtpm_clock_mpfs.c          MTIME-based FWTPM_CLOCK_HAL get_ms()
 ├── fwtpm_trng_scb.c            System Controller TRNG seed (FWTPM_RNG=SCB_NONCE)
 ├── amp-fwtpm.yaml              HSS payload generator config
-├── mpfs-fwtpm-disable-cpu4.dts Linux DTS overlay (disables cpu4)
+├── mpfs-fwtpm-disable-cpu4.dts Linux DTS overlay (disables cpu4, User Crypto)
 └── .gitignore
 ```
 
@@ -228,6 +228,13 @@ boot-debug fields + console ring through `/dev/mem`. The L2 LIM region at
 it even under a stock `CONFIG_STRICT_DEVMEM=y` kernel -- no kernel rebuild
 needed (verified on the Video Kit BSP). The only device-tree change
 required is the cpu4-disable overlay so Linux releases hart 4.
+
+> **Disable Linux's User Crypto driver.** On the Video Kit Yocto BSP the
+> `mchp-crypto-sbi` driver (`crypto@22000000`) fails its boot self-tests
+> with `-524` and can then oops in `crypto_dequeue_request`, hanging
+> Linux at boot whether or not the fwTPM runs. The overlay disables that
+> node; without the overlay, `fdt set /fabric-bus@22000000/crypto@22000000
+> status disabled` in u-boot before `bootm go` does the same.
 
 For the default `DDR_WCB` build the live mailbox and console ring sit in
 the non-cached DDR window at `0xC0000000`, while the boot/trap breadcrumbs
