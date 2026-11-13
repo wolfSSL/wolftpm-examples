@@ -381,7 +381,10 @@ the working stand-in until then.
    confirm no other master (HSS at runtime, a Linux `mss-sys-services`
    driver) drives it while hart 4 issues requests. Under the
    wolfBoot-hosted track this is the same path wolfBoot exposes as
-   `mpfs_nonce()`.
+   `mpfs_nonce()`. `FWTPM_RNG=MEMUSE` instead seeds the DRBG from wolfSSL's
+   wolfEntropy MemUse software entropy source (SP800-90B), timed with the
+   hart's `mcycle` counter; it needs no System Controller access and adds
+   `wolfentropy.c`, `sha3.c` and a 128 KB entropy buffer.
 5. **PQC** — enable ML-KEM / ML-DSA in `user_settings.h` and
    benchmark on hart 4 (600 MHz RV64GC, no FPU). Note ML-DSA-65/87
    raise `FWTPM_MAX_COMMAND_SIZE` to 8192, which would also grow the
