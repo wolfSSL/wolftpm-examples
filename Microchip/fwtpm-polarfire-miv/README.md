@@ -304,6 +304,7 @@ console ring over `/dev/mem`, prints the hart-4 caps self-test output
 ```
 python3 fwtpm_caps.py            # caps demo + transport/identity checks
 python3 fwtpm_caps.py --dump     # also print the full ring + breadcrumbs
+python3 fwtpm_caps.py --allow-wrapped  # after client commands overwrote the self-test
 ```
 
 It defaults to the `DDR_WCB` mailbox base; pass `--xport <backend>` or

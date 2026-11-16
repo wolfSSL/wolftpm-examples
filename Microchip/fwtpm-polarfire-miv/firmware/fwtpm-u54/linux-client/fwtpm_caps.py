@@ -41,6 +41,7 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA
 #
 import argparse
+import fcntl
 import mmap
 import os
 import struct
@@ -168,6 +169,13 @@ def console_text(m_live):
     return text.decode("utf-8", errors="replace")
 
 
+def console_wrapped(m_live):
+    """True once the server has written more than the ring holds, so the
+    oldest output (the boot-time self-test) has been overwritten."""
+    write_pos, _read_pos, size = struct.unpack_from("<QQI", m_live, 0x40)
+    return size == 4064 and write_pos > size
+
+
 def extract_caps(console):
     s = console.find("=== fTPM TPM2_GetCapability")
     if s < 0:
@@ -194,10 +202,17 @@ def main():
                          "--roundtrip-strict")
     ap.add_argument("--roundtrip-strict", action="store_true",
                     help="make a --roundtrip failure/timeout gate the RESULT")
+    ap.add_argument("--allow-wrapped", action="store_true",
+                    help="skip the on-hart self-test checks when client "
+                         "commands have overwritten them in the console ring")
     args = ap.parse_args()
     base = args.base if args.base is not None else XPORT_BASE[args.xport]
     do_rt = args.roundtrip or args.roundtrip_strict
 
+    if do_rt:
+        # Same lock as tpm_io_mpfs_mbox.c: one writer of the mailbox slot
+        lock_fd = os.open("/dev/mem", os.O_RDONLY)
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
     m_live = map_region(base, writable=do_rt)
     m_dbg  = m_live if base == DBG_BASE else map_region(DBG_BASE)
 
@@ -230,13 +245,19 @@ def main():
     check("TIS register block live (magic WTIS)", tis_magic == TIS_MAGIC)
     check("fTPM identity did_vid = WFTP (0x%08x)" % did_vid,
           did_vid == DID_VID)
-    check("on-hart TPM2_GetCapability ran (Manufacturer WOLF)",
-          '"WOLF"' in console)
-    # Success prints "TPM2_GetRandom(<n>) ="; failure prints "TPM2_GetRandom:
-    # rc=...". Match the actual firmware output rather than a symbolic string
-    # the firmware never emits.
-    check("on-hart TPM2_GetRandom ok (live entropy, no error)",
-          "TPM2_GetRandom(" in caps and "TPM2_GetRandom:" not in caps)
+    if caps or not (args.allow_wrapped and console_wrapped(m_live)):
+        check("on-hart TPM2_GetCapability ran (Manufacturer WOLF)",
+              '"WOLF"' in console)
+        # Success prints "TPM2_GetRandom(<n>) ="; failure prints
+        # "TPM2_GetRandom: rc=...". Match the actual firmware output rather
+        # than a symbolic string the firmware never emits.
+        check("on-hart TPM2_GetRandom ok (live entropy, no error)",
+              "TPM2_GetRandom(" in caps and "TPM2_GetRandom:" not in caps)
+    else:
+        # Commands from a Linux client (tpm_io_mpfs_mbox.c) log to the 4 KB
+        # console ring and overwrite the boot-time self-test output.
+        print("  [SKIP] on-hart self-test output no longer in the console "
+              "ring (overwritten by client commands)")
     # LIM breadcrumbs prove THIS boot is healthy: the retained DDR mailbox
     # fields above could match on stale data from a prior run that trapped
     # before C init cleared them.
