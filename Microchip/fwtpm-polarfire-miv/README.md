@@ -186,6 +186,18 @@ make
 
 Produces `fwtpm_u54.elf` (~210 KB text, linked at `0x91C00000`).
 
+For a TPM 2.0 v1.85 post-quantum fwTPM (ML-DSA-44/65/87 and ML-KEM-768
+alongside ECC and RSA):
+
+```bash
+make clean && make FWTPM_XPORT=LIM_CACHED MLDSA=1 MLKEM=1
+```
+
+ML-DSA needs 8 KB TIS FIFOs, which grows the shared-memory window to 32 KB
+(end `0x08008000`); that fits the L2 LIM but not the 16 KB reservation of
+the DDR transports, so use `LIM_CACHED`. The build also raises the hart-4
+stack and heap to 128 KB and 256 KB.
+
 ### Generate the HSS AMP payload
 
 ```bash
@@ -338,7 +350,9 @@ WOLFSSL_DIR=~/wolfssl WOLFTPM_DIR=~/wolftpm \
     YOCTO_TMP=~/yocto-dev-polarfire/build/tmp-glibc ./build_wolftpm_client.sh
 ```
 
-Copy `build-riscv64/bin/*` to the target and run as `root`:
+Add `PQC=1` for a fwTPM built with `MLDSA=1 MLKEM=1`; it also builds
+`pqc_ctrl`, `mldsa_sign` and `pqc_mssim_e2e`. Copy `build-riscv64/bin/*` to
+the target and run as `root`:
 
 ```
 ./caps                      # TPM2_GetCapability: manufacturer, vendor, PCR banks
@@ -346,6 +360,9 @@ Copy `build-riscv64/bin/*` to the target and run as `root`:
 ./extend 16 && ./read_pcr 16
 ./keygen -ecc               # ECC key under the storage key
 ./quote 16 quote.blob -ecc  # ECC attestation key + TPM2_Quote, verified
+./pqc_ctrl --caps --algs    # PQC=1: ML-KEM, ML-DSA, Hash-ML-DSA reported
+./mldsa_sign -mldsa=44      # PQC=1: ML-DSA key, sign and verify in the TPM
+./pqc_mssim_e2e             # PQC=1: ML-KEM-768, Hash-ML-DSA-44, ML-DSA-65 quote
 ```
 
 NV is RAM-backed in this build, so persistent keys and PCRs reset at each boot.
@@ -399,7 +416,6 @@ NV is RAM-backed in this build, so persistent keys and PCRs reset at each boot.
    wolfEntropy MemUse software entropy source (SP800-90B), timed with the
    hart's `mcycle` counter; it needs no System Controller access and adds
    `wolfentropy.c`, `sha3.c` and a 128 KB entropy buffer.
-5. **PQC** — enable ML-KEM / ML-DSA in `user_settings.h` and
-   benchmark on hart 4 (600 MHz RV64GC, no FPU). Note ML-DSA-65/87
-   raise `FWTPM_MAX_COMMAND_SIZE` to 8192, which would also grow the
-   `FWTPM_TIS_SHM_SIZE` shared region; ML-KEM + ML-DSA-44 stay at 4096.
+5. **PQC** — DONE for `LIM_CACHED`: `make FWTPM_XPORT=LIM_CACHED MLDSA=1
+   MLKEM=1` (see "Build");
+   the stock wolfTPM PQC examples run from Linux.

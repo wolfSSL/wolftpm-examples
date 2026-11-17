@@ -40,6 +40,10 @@ extern "C" {
 /*   0x08001040  FWTPM_TIS_REGS     (~8.2 KB -- regs + cmd/rsp FIFOs)   */
 /*   0x08004000  End (16 KB total)                                      */
 /*                                                                       */
+/* ML-DSA builds use 8 KB FIFOs (FWTPM_TIS_FIFO_SIZE), so FWTPM_TIS_REGS  */
+/* is ~16.2 KB and the window grows to 32 KB (end 0x08008000). The       */
+/* mailbox, console ring and TIS register header keep their offsets.    */
+/*                                                                       */
 /* LIM is L2 SRAM repurposed as scratchpad, reachable by every master   */
 /* over the L2 bus. The mailbox must be non-cached for the               */
 /* bare-metal hart 4 to observe Linux's writes (U54 L1d is               */
@@ -69,7 +73,11 @@ extern "C" {
 #else
     #define FWTPM_TIS_SHM_BASE 0x08000000UL   /* L2 LIM */
 #endif
-#define FWTPM_TIS_SHM_SIZE     0x4000UL      /* 16 KB total */
+#ifdef FWTPM_PQC_MLDSA
+    #define FWTPM_TIS_SHM_SIZE 0x8000UL      /* 32 KB total */
+#else
+    #define FWTPM_TIS_SHM_SIZE 0x4000UL      /* 16 KB total */
+#endif
 
 /* Transport IDs reported in mailbox.xport_id so the Linux client can
  * confirm which transport build it is talking to. */

@@ -91,6 +91,21 @@ ifeq ($(FWTPM_DEV_INSECURE_RNG),1)
   DEFS += -DFWTPM_DEV_INSECURE_RNG
 endif
 
+# Post-quantum (TPM 2.0 v1.85): MLDSA=1 and/or MLKEM=1. ML-DSA grows the
+# TIS FIFOs to 8 KB, so the shared-memory window becomes 32 KB; it fits the
+# L2 LIM (LIM_CACHED) but not the 16 KB reservation of the DDR transports.
+MLDSA ?= 0
+MLKEM ?= 0
+ifeq ($(MLDSA),1)
+  ifneq ($(FWTPM_XPORT),LIM_CACHED)
+    $(error MLDSA=1 needs a 32 KB mailbox window: build with FWTPM_XPORT=LIM_CACHED)
+  endif
+  DEFS += -DFWTPM_PQC_MLDSA
+endif
+ifeq ($(MLKEM),1)
+  DEFS += -DFWTPM_PQC_MLKEM
+endif
+
 # Verbose wolfSSL/wolfTPM logging. On by default (bring-up example);
 # build FWTPM_DEBUG=0 for a quiet/release-style build.
 FWTPM_DEBUG ?= 1
@@ -124,6 +139,9 @@ LDSCRIPT = mpfs250-u54.ld
 LDFLAGS  = $(CPU) -nostartfiles -Wl,--gc-sections -T$(LDSCRIPT)
 LDFLAGS += -Wl,-Map=$(TARGET).map,--cref
 LDFLAGS += -specs=nano.specs -specs=nosys.specs
+ifneq ($(MLDSA)$(MLKEM),00)
+LDFLAGS += -Wl,--defsym=FWTPM_STACK_SIZE=0x20000 -Wl,--defsym=FWTPM_HEAP_SIZE=0x40000
+endif
 
 # ========================================================================= #
 # Sources                                                                   #
@@ -168,6 +186,15 @@ WC_SRC += $(WOLFSSL_DIR)/wolfcrypt/src/pwdbased.c
 ifeq ($(FWTPM_RNG),MEMUSE)
 WC_SRC += $(WOLFSSL_DIR)/wolfcrypt/src/wolfentropy.c
 WC_SRC += $(WOLFSSL_DIR)/wolfcrypt/src/sha3.c
+else ifneq ($(MLDSA)$(MLKEM),00)
+WC_SRC += $(WOLFSSL_DIR)/wolfcrypt/src/sha3.c
+endif
+ifeq ($(MLDSA),1)
+WC_SRC += $(WOLFSSL_DIR)/wolfcrypt/src/wc_mldsa.c
+endif
+ifeq ($(MLKEM),1)
+WC_SRC += $(WOLFSSL_DIR)/wolfcrypt/src/wc_mlkem.c
+WC_SRC += $(WOLFSSL_DIR)/wolfcrypt/src/wc_mlkem_poly.c
 endif
 
 # wolfTPM fwTPM sources
@@ -236,6 +263,7 @@ help:
 	@echo "                    SCB_NONCE (default, HW TRNG) | MEMUSE (wolfEntropy) |"
 	@echo "                    JITTER (dev-only)"
 	@echo "  FWTPM_DEV_INSECURE_RNG=1  acknowledge the JITTER dev seed (else #error)"
+	@echo "  MLDSA=1 MLKEM=1   TPM 2.0 v1.85 ML-DSA / ML-KEM (MLDSA needs LIM_CACHED)"
 	@echo "  FWTPM_DEBUG=      Verbose wolfSSL/wolfTPM logging:"
 	@echo "                    1 (default) | 0 (quiet/release)"
 	@echo "  Example: make clean && make FWTPM_RNG=JITTER FWTPM_DEV_INSECURE_RNG=1"

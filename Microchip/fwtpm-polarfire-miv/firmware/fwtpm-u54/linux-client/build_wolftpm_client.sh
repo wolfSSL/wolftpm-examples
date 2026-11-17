@@ -11,6 +11,8 @@
 #   YOCTO_TMP    Yocto build tmp directory    (default ~/yocto-dev-polarfire/build/tmp-glibc)
 #   SYSROOT      riscv64 sysroot with glibc   (default: wolfssl recipe-sysroot in YOCTO_TMP)
 #   OUT          output directory             (default ./build-riscv64)
+#   PQC=1        also build the TPM 2.0 v1.85 ML-DSA / ML-KEM examples, for a
+#                fwTPM built with MLDSA=1 MLKEM=1
 # Binaries land in $OUT/bin.
 
 set -e
@@ -20,7 +22,19 @@ WOLFTPM_DIR=$(cd "${WOLFTPM_DIR:-$HERE/../../../../../../wolftpm}" && pwd)
 YOCTO_TMP=$(realpath -m "${YOCTO_TMP:-$HOME/yocto-dev-polarfire/build/tmp-glibc}")
 OUT=$(realpath -m "${OUT:-$HERE/build-riscv64}")
 JOBS=${JOBS:-$(nproc)}
-# OUT is rebuilt with rm -rf, so it must not overlap a source tree
+PQC=${PQC:-0}
+SSL_PQC=
+TPM_PQC=
+if [ "$PQC" = 1 ]; then
+    SSL_PQC="--enable-mldsa --enable-mlkem --enable-experimental"
+    TPM_PQC="--enable-v185"
+fi
+# OUT is rebuilt with rm -rf: it must be empty, new, or a previous output of
+# this script, and must not overlap a source tree
+MARK=.build_wolftpm_client
+if [ -d "$OUT" ] && [ -n "$(ls -A "$OUT")" ] && [ ! -f "$OUT/$MARK" ]; then
+    echo "OUT=$OUT is not empty and was not created by this script"; exit 1
+fi
 for src in "$WOLFSSL_DIR" "$WOLFTPM_DIR"; do
     case "$OUT/" in "$src/"*) echo "OUT must not be inside $src"; exit 1 ;; esac
     case "$src/" in "$OUT/"*) echo "OUT must not contain $src"; exit 1 ;; esac
@@ -39,6 +53,9 @@ if [ -z "$SYSROOT" ] || [ ! -f "$SYSROOT/usr/lib/libc.a" ]; then
 fi
 
 # The Yocto cross gcc looks for unprefixed as/ld; give it a -B directory
+mkdir -p "$OUT"
+touch "$OUT/$MARK"
+rm -rf "$OUT/bin"
 mkdir -p "$OUT/xbin" "$OUT/bin"
 for t in as ld ld.bfd ar ranlib nm strip; do
     ln -sf "$BINUTILS/riscv64-mchp-linux-$t" "$OUT/xbin/$t"
@@ -59,6 +76,7 @@ make distclean > /dev/null 2>&1 || true
 ./configure --host=$HOST CC="$CC" AR="$AR" RANLIB="$RANLIB" \
     --prefix="$PREFIX" --enable-static --disable-shared \
     --enable-wolftpm --enable-keygen --disable-examples --disable-crypttests \
+    $SSL_PQC \
     > "$OUT/wolfssl-configure.log"
 make -j"$JOBS" > "$OUT/wolfssl-make.log"
 make install > /dev/null
@@ -72,7 +90,7 @@ make distclean > /dev/null 2>&1 || true
 ./configure --host=$HOST CC="$CC" AR="$AR" RANLIB="$RANLIB" \
     --prefix="$PREFIX" --enable-static --disable-shared \
     --with-wolfcrypt="$PREFIX" --enable-advio --disable-autodetect \
-    --disable-swtpm --disable-fwtpm --disable-examples \
+    --disable-swtpm --disable-fwtpm --disable-examples $TPM_PQC \
     > "$OUT/wolftpm-configure.log"
 make -j"$JOBS" src/libwolftpm.la > "$OUT/wolftpm-make.log"
 
@@ -100,3 +118,8 @@ build_example extend    pcr/extend.c
 build_example read_pcr  pcr/read_pcr.c
 build_example keygen    keygen/keygen.c "$OUT/tpm_test_keys.o"
 build_example quote     pcr/quote.c     "$OUT/tpm_test_keys.o"
+if [ "$PQC" = 1 ]; then
+    build_example pqc_ctrl      pqc/pqc_ctrl.c
+    build_example mldsa_sign    pqc/mldsa_sign.c
+    build_example pqc_mssim_e2e pqc/pqc_mssim_e2e.c
+fi

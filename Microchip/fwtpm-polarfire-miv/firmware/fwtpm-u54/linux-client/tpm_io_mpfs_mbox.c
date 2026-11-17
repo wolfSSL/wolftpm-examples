@@ -49,7 +49,9 @@
     #error "tpm_io_mpfs_mbox.c needs wolfTPM built with --enable-advio"
 #endif
 
-/* Covers the mailbox, console ring and TIS register block (16 KB of LIM) */
+/* Covers the mailbox, console ring and the TIS register header, the only
+ * part of FWTPM_TIS_REGS this client touches; the header offsets are the
+ * same in the 16 KB and 32 KB (ML-DSA) layouts */
 #ifndef FWTPM_MPFS_MAP_SIZE
     #define FWTPM_MPFS_MAP_SIZE 0x4000
 #endif

@@ -15,8 +15,9 @@ MEMORY
     ddr (rwx) : ORIGIN = 0x91C00000, LENGTH = 4M
 }
 
-STACK_SIZE = 64K;
-HEAP_SIZE  = 64K;
+/* The post-quantum build raises both with --defsym (see Makefile) */
+STACK_SIZE = DEFINED(FWTPM_STACK_SIZE) ? FWTPM_STACK_SIZE : 64K;
+HEAP_SIZE  = DEFINED(FWTPM_HEAP_SIZE) ? FWTPM_HEAP_SIZE : 64K;
 
 SECTIONS
 {
