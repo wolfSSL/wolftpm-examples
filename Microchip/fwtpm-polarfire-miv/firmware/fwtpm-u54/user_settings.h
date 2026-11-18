@@ -96,6 +96,17 @@ extern "C" {
     /* Controller hardware nonce service (fwtpm_trng_scb.c). BENCH-VALIDATED; */
     /* see the SCB mailbox-contention caveat in that file's header.          */
     #define CUSTOM_RAND_GENERATE_SEED mpfs_rng_seed_scb
+#elif defined(FWTPM_RNG_MEMUSE)
+    /* wolfEntropy MemUse (SP800-90B) seeds the DRBG from memory-access      */
+    /* timing jitter. MTIME is only 1 MHz, so time with the hart's mcycle.   */
+    #define HAVE_ENTROPY_MEMUSE
+    #define WOLFSSL_SHA3 /* conditioning hash */
+    #define CUSTOM_ENTROPY_TIMEHIRES mpfs_entropy_time
+    #define CUSTOM_RAND_GENERATE_SEED mpfs_rng_seed_memuse
+    #ifndef __ASSEMBLER__
+    unsigned long long mpfs_entropy_time(void);
+    int mpfs_rng_seed_memuse(unsigned char* output, unsigned int sz);
+    #endif
 #else
     /* DEVELOPMENT-ONLY backend (FWTPM_RNG=JITTER): mpfs_rng_seed_cb derives  */
     /* bytes from MTIME jitter, predictable across boots and UNACCEPTABLE for */

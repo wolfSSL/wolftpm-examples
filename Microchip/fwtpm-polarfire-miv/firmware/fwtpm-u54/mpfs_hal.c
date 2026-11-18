@@ -197,7 +197,7 @@ void FWTPM_TIS_SetDefaultHAL(struct FWTPM_CTX *ctx) { (void)ctx; }
 /* The default SCB_NONCE backend (fwtpm_trng_scb.c) supplies             */
 /* mpfs_rng_seed_scb instead and needs no FWTPM_DEV_INSECURE_RNG opt-in. */
 /* -------------------------------------------------------------------- */
-#ifndef FWTPM_RNG_SCB_NONCE
+#if !defined(FWTPM_RNG_SCB_NONCE) && !defined(FWTPM_RNG_MEMUSE)
 
 /*                                                                       */
 /* Derives DRBG seed bytes from MTIME read jitter mixed through an LCG.  */
@@ -233,4 +233,23 @@ int mpfs_rng_seed_cb(unsigned char *output, unsigned int sz)
     return 0;
 }
 
-#endif /* !FWTPM_RNG_SCB_NONCE */
+#endif /* !FWTPM_RNG_SCB_NONCE && !FWTPM_RNG_MEMUSE */
+
+#ifdef FWTPM_RNG_MEMUSE
+#include <wolfssl/wolfcrypt/wolfentropy.h>
+
+/* High-resolution time source for wolfEntropy (CUSTOM_ENTROPY_TIMEHIRES).
+ * Needs mcountinhibit.CY clear (reset default); a frozen counter fails the
+ * wolfEntropy health tests, so seeding fails rather than going weak. */
+unsigned long long mpfs_entropy_time(void)
+{
+    unsigned long long c;
+    __asm__ volatile ("csrr %0, mcycle" : "=r"(c));
+    return c;
+}
+
+int mpfs_rng_seed_memuse(unsigned char* output, unsigned int sz)
+{
+    return wc_Entropy_Get(MAX_ENTROPY_BITS, output, sz);
+}
+#endif /* FWTPM_RNG_MEMUSE */

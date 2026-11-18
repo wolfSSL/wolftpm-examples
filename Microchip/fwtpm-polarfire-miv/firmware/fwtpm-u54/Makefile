@@ -77,6 +77,8 @@ endif
 #   JITTER              development-only MTIME jitter (mpfs_rng_seed_cb);
 #                       requires FWTPM_DEV_INSECURE_RNG=1 to acknowledge the
 #                       weak seed -- the build #errors otherwise.
+#   MEMUSE              wolfEntropy MemUse software entropy source, timed with
+#                       the hart's mcycle counter; no System Controller use.
 # Secure by default: a plain `make` uses the hardware TRNG.
 FWTPM_RNG ?= SCB_NONCE
 DEFS      += -DFWTPM_RNG_$(FWTPM_RNG)
@@ -163,6 +165,10 @@ WC_SRC += $(WOLFSSL_DIR)/wolfcrypt/src/signature.c
 WC_SRC += $(WOLFSSL_DIR)/wolfcrypt/src/cmac.c
 WC_SRC += $(WOLFSSL_DIR)/wolfcrypt/src/wc_encrypt.c
 WC_SRC += $(WOLFSSL_DIR)/wolfcrypt/src/pwdbased.c
+ifeq ($(FWTPM_RNG),MEMUSE)
+WC_SRC += $(WOLFSSL_DIR)/wolfcrypt/src/wolfentropy.c
+WC_SRC += $(WOLFSSL_DIR)/wolfcrypt/src/sha3.c
+endif
 
 # wolfTPM fwTPM sources
 TPM_SRC  = $(WOLFTPM_DIR)/src/tpm2.c
@@ -227,7 +233,8 @@ help:
 	@echo "                    DDR_WCB (default) | LIM_CACHED |"
 	@echo "                    DDR_NONCACHED | L1D_OFF | IHC"
 	@echo "  FWTPM_RNG=        DRBG seed source:"
-	@echo "                    SCB_NONCE (default, HW TRNG) | JITTER (dev-only)"
+	@echo "                    SCB_NONCE (default, HW TRNG) | MEMUSE (wolfEntropy) |"
+	@echo "                    JITTER (dev-only)"
 	@echo "  FWTPM_DEV_INSECURE_RNG=1  acknowledge the JITTER dev seed (else #error)"
 	@echo "  FWTPM_DEBUG=      Verbose wolfSSL/wolfTPM logging:"
 	@echo "                    1 (default) | 0 (quiet/release)"
