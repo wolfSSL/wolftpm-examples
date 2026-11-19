@@ -158,6 +158,8 @@ firmware/fwtpm-u54/
 ├── fwtpm_nv_ram.c              RAM-backed FWTPM_NV_HAL (read/write/erase/maxSize)
 ├── fwtpm_clock_mpfs.c          MTIME-based FWTPM_CLOCK_HAL get_ms()
 ├── fwtpm_trng_scb.c            System Controller TRNG seed (FWTPM_RNG=SCB_NONCE)
+├── linux-client/tpm_io_mpfs_mbox.c      wolfTPM TPM2_IoCb over the mailbox (Linux)
+├── linux-client/build_wolftpm_client.sh Cross-build the stock wolfTPM examples
 ├── amp-fwtpm.yaml              HSS payload generator config
 ├── mpfs-fwtpm-disable-cpu4.dts Linux DTS overlay (disables cpu4, User Crypto)
 └── .gitignore
@@ -183,6 +185,18 @@ make
 ```
 
 Produces `fwtpm_u54.elf` (~210 KB text, linked at `0x91C00000`).
+
+For a TPM 2.0 v1.85 post-quantum fwTPM (ML-DSA-44/65/87 and ML-KEM-768
+alongside ECC and RSA):
+
+```bash
+make clean && make FWTPM_XPORT=LIM_CACHED MLDSA=1 MLKEM=1
+```
+
+ML-DSA needs 8 KB TIS FIFOs, which grows the shared-memory window to 32 KB
+(end `0x08008000`); that fits the L2 LIM but not the 16 KB reservation of
+the DDR transports, so use `LIM_CACHED`. The build also raises the hart-4
+stack and heap to 128 KB and 256 KB.
 
 ### Generate the HSS AMP payload
 
@@ -302,52 +316,62 @@ console ring over `/dev/mem`, prints the hart-4 caps self-test output
 ```
 python3 fwtpm_caps.py            # caps demo + transport/identity checks
 python3 fwtpm_caps.py --dump     # also print the full ring + breadcrumbs
+python3 fwtpm_caps.py --allow-wrapped  # after client commands overwrote the self-test
 ```
 
 It defaults to the `DDR_WCB` mailbox base; pass `--xport <backend>` or
 `--base <addr>` to match a different `FWTPM_XPORT` build. This is the
-working analogue of the cross-compiled `wolftpm/examples/wrap/caps`: the
-caps run on hart 4 (the reliable server -> Linux path) rather than being
-driven from Linux, since the interactive round-trip is still being
-hardened.
+boot-time self-test view; the stock wolfTPM examples (next section) send
+live TPM commands from Linux.
 
-### Running the stock wolfTPM examples (cross-compile)
+### Running the stock wolfTPM examples from Linux
 
-The reliable capabilities demo today runs *inside the fTPM* on hart 4 (see
-"What works today" above) and is read with `fwtpm_caps.py`. Running
-the **stock** `wolftpm/examples/wrap/caps` binary *from Linux* against this
-fTPM additionally needs the interactive Linux -> hart 4 round-trip plus a
-wolfTPM IO callback that bridges TPM2 calls onto the shared-memory mailbox
-(roadmap items 1-2). The cross-compile itself, for when that lands:
+`linux-client/tpm_io_mpfs_mbox.c` is a wolfTPM IO callback (`TPM2_IoCb`,
+`WOLFTPM_ADV_IO` form) that forwards each TIS register access from Linux to
+hart 4 through the mailbox: it maps the LIM window from `/dev/mem`, checks
+the `FWTI` and `WTIS` magics, writes
+`reg_addr`/`reg_len`/`reg_is_write`/`reg_data`, raises `cmd_ready` with a
+nonce and waits for `rsp_ready` with the matching `echo_nonce`. Linked ahead
+of `libwolftpm.a`, it replaces the library's example HAL, so the stock
+examples run unchanged. It defaults to the `LIM_CACHED` mailbox at
+`0x08000000`, so build the firmware with `FWTPM_XPORT=LIM_CACHED` (the
+Makefile default is `DDR_WCB`) and boot it under an HSS that sets up hart-4
+PMA for LIM (the HSS 0.99.44 build used for validation does; see "Transport
+options"); for a DDR transport set `FWTPM_MPFS_BASE` (for example
+`0xC0000000` for `DDR_WCB`), which has not been tested with this callback.
+
+`linux-client/build_wolftpm_client.sh` cross-builds static wolfSSL and
+wolfTPM with the Yocto riscv64 toolchain (from a `mchp-base-image` build)
+and links `caps`, `getrandom`, `extend`, `read_pcr`, `keygen` and `quote`:
 
 ```bash
-# RISC-V 64-bit Linux cross toolchain (Yocto SDK, or a distro
-# riscv64-linux-gnu- gcc). Build wolfSSL, then wolfTPM:
-export CROSS=riscv64-linux-gnu
-
-cd wolfssl
-./configure --host=$CROSS CC=$CROSS-gcc --enable-cryptocb \
-    --enable-rsa --enable-ecc --disable-examples --prefix=$PWD/../rv64-root
-make && make install
-
-cd ../wolftpm
-./configure --host=$CROSS CC=$CROSS-gcc \
-    --with-wolfcrypt=$PWD/../rv64-root --prefix=$PWD/../rv64-root
-make
-file examples/wrap/caps     # ELF 64-bit LSB executable, UCB RISC-V
+cd firmware/fwtpm-u54/linux-client
+WOLFSSL_DIR=~/wolfssl WOLFTPM_DIR=~/wolftpm \
+    YOCTO_TMP=~/yocto-dev-polarfire/build/tmp-glibc ./build_wolftpm_client.sh
 ```
 
-Stage `examples/wrap/caps` onto the target (over the SD rootfs or `scp`).
-Until the mailbox IO bridge exists it has no fTPM endpoint to talk to;
-with a `/dev/tpmrm0` shim or a custom `TPM2_IoCb` over the mailbox it runs
-unchanged. The on-hart-4 self-test in `main.c` (`fwtpm_caps_selftest`) is
-the working stand-in until then.
+Add `PQC=1` for a fwTPM built with `MLDSA=1 MLKEM=1`; it also builds
+`pqc_ctrl`, `mldsa_sign` and `pqc_mssim_e2e`. Copy `build-riscv64/bin/*` to
+the target and run as `root`:
+
+```
+./caps                      # TPM2_GetCapability: manufacturer, vendor, PCR banks
+./getrandom                 # TPM2_GetRandom
+./extend 16 && ./read_pcr 16
+./keygen -ecc               # ECC key under the storage key
+./quote 16 quote.blob -ecc  # ECC attestation key + TPM2_Quote, verified
+./pqc_ctrl --caps --algs    # PQC=1: ML-KEM, ML-DSA, Hash-ML-DSA reported
+./mldsa_sign -mldsa=44      # PQC=1: ML-DSA key, sign and verify in the TPM
+./pqc_mssim_e2e             # PQC=1: ML-KEM-768, Hash-ML-DSA-44, ML-DSA-65 quote
+```
+
+NV is RAM-backed in this build, so persistent keys and PCRs reset at each boot.
 
 ## Roadmap
 
-1. **Reliable interactive transport** — the server -> Linux path works
-   (used by the on-hart-4 caps demo); the Linux -> hart 4 round-trip needs
-   the mailbox in genuinely non-cached memory. `DDR_WCB` (0xC0000000) is
+1. **Reliable interactive transport** — the Linux -> hart 4 round-trip
+   works on `LIM_CACHED` under an HSS that sets up hart-4 PMA for LIM (the
+   stock wolfTPM examples run over it). `DDR_WCB` (0xC0000000) is
    coherent for both hart 4 and Linux, but the write-combine ordering for
    the interactive path is still being hardened. The clean fix is an HSS
    that configures hart-4 coherency (an earlier bring-up's HSS did, via
@@ -371,9 +395,9 @@ the working stand-in until then.
      gate the result.
    (`FWTPM_XPORT=L1D_OFF` is a dead end: the U54 `csrw 0x7C1` halts
    hart 4 before boot.)
-2. **Linux userspace TIS HAL** — once (1) lands, wrap the mailbox
-   behind wolfTPM's HAL callbacks so the `wolftpm/examples/` tree
-   runs unchanged on the target.
+2. **Linux userspace TIS HAL** — DONE for `LIM_CACHED`:
+   `linux-client/tpm_io_mpfs_mbox.c` runs the stock `wolftpm/examples/`
+   on the target (see "Running the stock wolfTPM examples from Linux").
 3. **FRAM-backed NV** — replace `fwtpm_nv_ram.c` with an I²C/SPI
    FRAM driver so seeds and counters survive a power cycle.
 4. **Hardware TRNG entropy** — DONE (default). The default
@@ -392,7 +416,6 @@ the working stand-in until then.
    wolfEntropy MemUse software entropy source (SP800-90B), timed with the
    hart's `mcycle` counter; it needs no System Controller access and adds
    `wolfentropy.c`, `sha3.c` and a 128 KB entropy buffer.
-5. **PQC** — enable ML-KEM / ML-DSA in `user_settings.h` and
-   benchmark on hart 4 (600 MHz RV64GC, no FPU). Note ML-DSA-65/87
-   raise `FWTPM_MAX_COMMAND_SIZE` to 8192, which would also grow the
-   `FWTPM_TIS_SHM_SIZE` shared region; ML-KEM + ML-DSA-44 stay at 4096.
+5. **PQC** — DONE for `LIM_CACHED`: `make FWTPM_XPORT=LIM_CACHED MLDSA=1
+   MLKEM=1` (see "Build");
+   the stock wolfTPM PQC examples run from Linux.

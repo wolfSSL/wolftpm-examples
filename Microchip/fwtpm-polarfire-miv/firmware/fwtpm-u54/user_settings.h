@@ -165,6 +165,39 @@ extern "C" {
 #define WC_RSA_PSS
 
 /* ========================================================================= */
+/* Post-quantum (TPM 2.0 v1.85), selected by MLDSA=1 / MLKEM=1 (Makefile)    */
+/* ========================================================================= */
+#if defined(FWTPM_PQC_MLDSA) || defined(FWTPM_PQC_MLKEM)
+    #define WOLFTPM_V185
+    #define WOLFSSL_SHA3
+    #define WOLFSSL_SHAKE128
+    #define WOLFSSL_SHAKE256
+#endif
+#ifdef FWTPM_PQC_MLDSA
+    #define WOLFSSL_HAVE_MLDSA
+    #define WOLFSSL_WC_DILITHIUM
+    #define WOLFSSL_MLDSA_MAKE_KEY_SMALL_MEM
+    #define WOLFSSL_MLDSA_SIGN_SMALL_MEM
+    #define WOLFSSL_MLDSA_VERIFY_SMALL_MEM
+#else
+    #define WOLFTPM_NO_MLDSA
+    /* Keeps wolfTPM's TIS FIFOs at 4 KB (16 KB window) for ML-KEM only */
+    #define WOLFSSL_NO_ML_DSA_65
+    #define WOLFSSL_NO_ML_DSA_87
+#endif
+#ifdef FWTPM_PQC_MLKEM
+    #define WOLFSSL_HAVE_MLKEM
+    #define WOLFSSL_WC_MLKEM
+    #define WOLFSSL_NO_ML_KEM_512
+    #define WOLFSSL_NO_ML_KEM_1024
+    /* The names wolfTPM's fwTPM checks for its ML-KEM parameter sets */
+    #define WOLFSSL_NO_KYBER512
+    #define WOLFSSL_NO_KYBER1024
+#else
+    #define WOLFTPM_NO_MLKEM
+#endif
+
+/* ========================================================================= */
 /* Debug                                                                     */
 /* ========================================================================= */
 /* Verbose wolfSSL/wolfTPM logging, gated behind FWTPM_DEBUG (set by the

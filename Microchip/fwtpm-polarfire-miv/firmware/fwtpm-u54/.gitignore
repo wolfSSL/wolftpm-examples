@@ -9,3 +9,6 @@ u-boot.bin
 # Python client bytecode
 __pycache__/
 *.pyc
+
+# Linux client cross-build output
+linux-client/build-riscv64/
